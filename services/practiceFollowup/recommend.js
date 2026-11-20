@@ -11,6 +11,7 @@
 // Questions without a reliable skill mapping are left out (no invented
 // recommendation); the original report stays as it is.
 const catalog = require('./catalog');
+const { topicSkillId, defaultLabel } = require('./topicSkill');
 const { isAlliterative, fractionAddedSame } = require('./text');
 
 function misconceptionRuleFor(skill, concept, reasoning) {
@@ -64,7 +65,6 @@ function recommendForAttempt(attempt) {
       if (!rule) return;
       kind = 'reasoning_misconception';
     }
-    if (!skill) { unmapped += 1; return; }
     const ev = {
       index,
       kind,
@@ -74,6 +74,17 @@ function recommendForAttempt(attempt) {
       correctAnswer: String(q.correctAnswer ?? '').slice(0, 300),
       at: attempt.created_at || null,
     };
+    if (!skill) {
+      // Not in the vetted catalogue: practise the topic itself. Its teaching
+      // and fresh questions are built from the lesson when the student opens
+      // it (topicSkill.js).
+      unmapped += 1;
+      if (!attempt.topic) return;
+      const id = topicSkillId(attempt.topic);
+      if (!bySkill.has(id)) bySkill.set(id, { skill: { id, label: defaultLabel(attempt.topic), shortName: String(attempt.topic).slice(0, 60) }, evidence: [] });
+      bySkill.get(id).evidence.push({ ...ev, confusion: null });
+      return;
+    }
     ev.confusion = confusionFor(skill, ev);
     if (!bySkill.has(skill.id)) bySkill.set(skill.id, { skill, evidence: [] });
     bySkill.get(skill.id).evidence.push(ev);

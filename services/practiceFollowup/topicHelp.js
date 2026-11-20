@@ -10,7 +10,7 @@
 //     misconception in the reasoning.
 // Resolved: the student met the independent follow-up rule (two in a row)
 // for that skill after the latest evidence. New evidence later raises it again.
-const catalog = require('./catalog');
+const { displayNames } = require('./topicSkill');
 
 const MIN_DISTINCT_QUESTIONS = 2;
 
@@ -33,6 +33,7 @@ function computeTopicHelp(followups, responses) {
       const key = `orig:${f.attempt_id}:${e.index}`;
       g.items.set(key, Math.max(g.items.get(key) || 0, ms(e.at || f.created_at)));
     }
+    if (!g.names || f.skill_pack) g.names = displayNames(f);
     const at = ms(f.created_at);
     const prev = g.topics.get(f.topic);
     if (!prev || at > prev.at) g.topics.set(f.topic, { topic: f.topic, subject: f.subject, at });
@@ -51,15 +52,15 @@ function computeTopicHelp(followups, responses) {
   for (const g of groups.values()) {
     const open = [...g.items.values()].filter((t) => t > g.resolvedAt);
     if (open.length < MIN_DISTINCT_QUESTIONS) continue;
-    const skill = catalog.getSkill(g.skillId);
+    const names = g.names || displayNames({ skill_id: g.skillId });
     const latestTopic = [...g.topics.values()].sort((a, b) => b.at - a.at)[0] || {};
     const item = {
       skillId: g.skillId,
-      label: skill?.label || g.skillId,
-      shortName: skill?.shortName || g.skillId,
-      nextPractice: skill?.nextPractice || null,
+      label: names.label || g.skillId,
+      shortName: names.shortName || g.skillId,
+      nextPractice: names.nextPractice || null,
       topic: latestTopic.topic || null,
-      subject: latestTopic.subject || skill?.subject || null,
+      subject: latestTopic.subject || null,
       evidenceCount: open.length,
       lastEvidenceAt: new Date(Math.max(...open)).toISOString(),
     };

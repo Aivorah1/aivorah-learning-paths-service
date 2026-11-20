@@ -7,6 +7,7 @@ const reasoning = require('../../services/practiceFollowup/reasoning');
 const session = require('../../services/practiceFollowup/session');
 const { computeTopicHelp } = require('../../services/practiceFollowup/topicHelp');
 const { isAlliterative, fractionAddedSame, normalize } = require('../../services/practiceFollowup/text');
+const topicSkill = require('../../services/practiceFollowup/topicSkill');
 
 const PUN = 'en.figurative.pun-vs-alliteration';
 const FRAC = 'math.fractions.equivalent';
@@ -83,13 +84,14 @@ describe('recommendations from a test report', () => {
     expect(wrongIdea.recommendations[0].evidence[0].kind).toBe('reasoning_misconception');
   });
 
-  test('different skills give separate recommendations; unmapped questions invent nothing', () => {
+  test('different skills give separate recommendations; other questions go to one topic practice', () => {
     const attempt = { ...englishAttempt([]), subject: 'Mathematics', grade: 'Grade 6', per_question_results: [
       q('Which fraction is equivalent to 2/5?', false, { studentAnswer: '3/6', correctAnswer: '4/10' }),
       q('What is 3 + 4?', false),
     ] };
     const { recommendations, unmapped } = recommendForAttempt(attempt);
-    expect(recommendations.map((r) => r.skillId)).toEqual([FRAC]);
+    expect(recommendations.map((r) => r.skillId)).toEqual([FRAC, 'topic:a-concrete-example']);
+    expect(recommendations[1]).toMatchObject({ label: 'Understanding “A Concrete Example”', evidence: [expect.objectContaining({ question: 'What is 3 + 4?', kind: 'incorrect' })] });
     expect(recommendations[0].evidence[0].confusion).toBe('added_same_number');
     expect(unmapped).toBe(1);
   });
@@ -251,5 +253,71 @@ describe('teacher: needs topic help', () => {
     expect(computeTopicHelp([done], []).size).toBe(0);
     const later = f({ attempt_id: 'a3', evidence: [{ index: 0, kind: 'incorrect', at: '2026-11-20T09:00:00Z' }, { index: 2, kind: 'incorrect', at: '2026-11-20T09:00:00Z' }] });
     expect(computeTopicHelp([done, later], []).get('s1')[0].evidenceCount).toBe(2);
+  });
+});
+
+describe('topic skill packs (any topic)', () => {
+  const good = () => ({
+    label: 'Key events in Quality',
+    teaching: { refresher: { title: 'r', body: 'Refresher body.' }, methods: [
+      { id: 'explanation', title: 't', body: 'Explanation body.' },
+      { id: 'key_points', title: 't', body: 'Key points.', table: [['a', 'b'], ['c', 'd']] },
+      { id: 'step_by_step', title: 't', body: 'Steps.', steps: ['one', 'two'] }] },
+    rubric: { keyIdeas: ['Firms advertised.'] },
+    questions: [
+      { type: 'mcq', question: 'Q1?', options: ['a', 'b', 'c'], answer: 1, hint: 'h', solution: 's', whyWrong: { 0: 'no', 1: 'is the answer, dropped', 9: 'out of range' } },
+      { type: 'fill_blank', question: 'He made boots by ____.', answers: ['hand'], hint: 'h', solution: 's' },
+      { type: 'mcq', question: 'Q3?', options: ['a', 'b', 'c'], answer: 0, hint: 'h', solution: 's' },
+      { type: 'fill_blank', question: 'One ____ in the window.', answers: ['pair of boots'], hint: 'h', solution: 's' },
+      { type: 'mcq', question: 'Bad: answer out of range', options: ['a', 'b', 'c'], answer: 5, hint: 'h', solution: 's' },
+      { type: 'mcq', question: 'Bad: duplicate options', options: ['a', 'a', 'b'], answer: 0, hint: 'h', solution: 's' },
+      { type: 'fill_blank', question: 'Bad: no blank here', answers: ['x'], hint: 'h', solution: 's' },
+      { type: 'fill_blank', question: 'Bad: long answer ____', answers: ['this answer is far too long'], hint: 'h', solution: 's' },
+    ],
+  });
+
+  test('keeps only fully valid questions, numbers them, and drops the correct option from whyWrong', () => {
+    const pack = topicSkill.validatePack(good(), { topic: 'Quality' });
+    expect(pack.questions.map((q) => q.id)).toEqual(['tq-1', 'tq-2', 'tq-3', 'tq-4']);
+    expect(pack.questions[0].whyWrong).toEqual({ 0: 'no' });
+    expect(pack.teaching.methods.map((m) => m.id)).toEqual(['explanation', 'key_points', 'step_by_step']);
+    expect(pack.label).toBe('Key events in Quality');
+  });
+
+  test('too few valid questions or no teaching -> rejected (nothing is guessed)', () => {
+    const few = good(); few.questions = few.questions.slice(0, 3);
+    expect(() => topicSkill.validatePack(few, { topic: 'Quality' })).toThrow(topicSkill.GenerationError);
+    const noTeach = good(); noTeach.teaching = {};
+    expect(() => topicSkill.validatePack(noTeach, { topic: 'Quality' })).toThrow(topicSkill.GenerationError);
+    expect(() => topicSkill.validatePack(null, { topic: 'Quality' })).toThrow(topicSkill.GenerationError);
+  });
+
+  test('a saved pack becomes a skill the session rules can use; catalogue skills are unchanged', () => {
+    const pack = topicSkill.validatePack(good(), { topic: 'Quality' });
+    const skill = topicSkill.skillForFollowup({ skill_id: 'topic:quality', subject: 'English', skill_pack: pack });
+    expect(skill._byId.get('tq-2').answers).toEqual(['hand']);
+    expect(catalog.publicQuestion(skill._byId.get('tq-1'))).not.toHaveProperty('answer');
+    expect(topicSkill.skillForFollowup({ skill_id: 'topic:quality' })).toBeNull();
+    expect(topicSkill.skillForFollowup({ skill_id: PUN }).id).toBe(PUN);
+    expect(topicSkill.topicSkillId('The Wit that Won Hearts')).toBe('topic:the-wit-that-won-hearts');
+  });
+
+  test('generation retries once, then fails without guessing', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const call = jest.fn().mockResolvedValueOnce('not json').mockResolvedValueOnce(JSON.stringify(good()));
+    const pack = await topicSkill.generatePack({ topic: 'Quality', subject: 'English', grade: 'Grade 9', evidence: [] }, { callModel: call });
+    expect(pack.questions).toHaveLength(4);
+    await expect(topicSkill.generatePack({ topic: 'Quality', evidence: [] }, { callModel: async () => 'nope' })).rejects.toThrow(topicSkill.GenerationError);
+    console.error.mockRestore();
+  });
+
+  test('a reworded copy of an original question is not fresh', () => {
+    const ctx = { originalQuestions: new Set([normalize("What was the cause of Mr Gessler's death as reported by the young man?")]), originalBlob: '', workedBlob: '' };
+    expect(session.isFresh({ question: "What was the cause of Mr Gessler's death, as the young man reported?", examples: [] }, ctx)).toBe(false);
+    expect(session.isFresh({ question: 'What did the big firms use to win customers?', examples: [] }, ctx)).toBe(true);
+    // Same fact, same answer, new wording -> not fresh; same answer to a different question -> fine.
+    const pairs = { ...ctx, originalPairs: [{ question: "What title was given to the eight celebrated poets in Krishnadeva Raya's court?", answer: normalize('Ashtadiggajas') }] };
+    expect(session.isFresh({ type: 'fill_blank', question: "The group of eight poets in Krishnadeva Raya's court were known as the _____.", answers: ['Ashtadiggajas'], examples: [] }, pairs)).toBe(false);
+    expect(session.isFresh({ type: 'mcq', question: 'What does the word "Ashtadiggajas" mean?', options: ['eight elephants', 'Ashtadiggajas'], answer: 0, examples: [] }, pairs)).toBe(true);
   });
 });

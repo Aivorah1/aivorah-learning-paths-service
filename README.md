@@ -73,14 +73,21 @@ Runs on `PORT` (default `3014`).
   The vetted skill catalogue (teaching methods, fresh questions with answer
   keys, hints, solutions, reasoning rubric) is in `data/practice-skills/*.json`;
   answer keys never leave the server. Student (own data only):
-  `GET attempts/:attemptId` (recommendations), `GET :id` (resumable session),
+  `GET attempts/:attemptId` (recommendations), `GET for-topic?topic=&subject=`
+  (the follow-up Ask Aivorah opens for a topic), `GET :id` / `POST :id/open
+  {lessonText}` (resumable session),
   `POST :id/explain-another-way|hint|solution|answer|clarify`, `GET :id/details`.
   Parent (linked children): `GET parent/children/:childId`. Teacher (linked
   students): `GET teacher/support` ("Needs topic help"),
   `GET teacher/students/:studentId/skills/:skillId`. The model only classifies
   the student's reasoning (supported / unclear / misconception); grading,
-  question choice, hint history, progress and flags are server rules. Optional
-  env: `PRACTICE_REASONING_TIMEOUT_MS` (default 20000).
+  question choice, hint history, progress and flags are server rules. Missed
+  questions outside the catalogue become one "topic skill" per test
+  (`topic:<topic>`): its teaching and 6 fresh questions with answer keys are
+  generated once from the lesson text, validated, and saved in
+  `practice_followups.skill_pack` (aivorah-db `0031`). Optional env:
+  `PRACTICE_REASONING_TIMEOUT_MS` (default 20000),
+  `PRACTICE_GENERATION_TIMEOUT_MS` (default 60000).
 - `GET /health`
 
 ## Branching

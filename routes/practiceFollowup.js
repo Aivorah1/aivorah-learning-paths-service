@@ -9,7 +9,9 @@
  *
  * Student (own data only, Firebase student token):
  *   GET  /practice-followup/attempts/:attemptId        recommendations for one test
+ *   GET  /practice-followup/for-topic?topic=&subject=  open follow-up for a topic (Ask Aivorah)
  *   GET  /practice-followup/:id                        resumable session
+ *   POST /practice-followup/:id/open                   { lessonText? } same, grounding a new topic pack
  *   POST /practice-followup/:id/explain-another-way    { message? }
  *   POST /practice-followup/:id/hint                   { questionId }
  *   POST /practice-followup/:id/solution               { questionId }
@@ -31,12 +33,16 @@ const { recommendForAttempt } = require('../services/practiceFollowup/recommend'
 const { parseAnswer, gradeAnswer, correctAnswerText, wrongFeedback } = require('../services/practiceFollowup/grading');
 const reasoningCheck = require('../services/practiceFollowup/reasoning');
 const { computeTopicHelp } = require('../services/practiceFollowup/topicHelp');
+const topicSkill = require('../services/practiceFollowup/topicSkill');
 
 const router = express.Router();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const { MESSAGES } = session;
 
 const saveFailed = (res, err) => {
+  if (err instanceof topicSkill.GenerationError) {
+    return res.status(503).json({ code: 'generation_failed', error: 'Aivorah could not prepare your practice questions just now. Please try again.' });
+  }
   console.error('[practice-followup] save failed:', err?.message);
   return res.status(503).json({ code: 'save_failed', error: "Your progress couldn't be saved just now. Please try again." });
 };
@@ -47,14 +53,34 @@ async function loadOwnFollowup(req, res) {
   const f = await store.getFollowup(req.params.id);
   // Same answer for "missing" and "someone else's": never reveals another learner's data.
   if (!f || f.student_id !== req.auth.studentId) { res.status(404).json({ error: 'Not found' }); return null; }
-  const skill = catalog.getSkill(f.skill_id);
-  if (!skill) { res.status(410).json({ code: 'skill_unavailable', error: 'This practice is no longer available.' }); return null; }
+  // A topic skill has no skill object until its pack is built (on open).
+  const skill = topicSkill.skillForFollowup(f);
+  if (!skill && !topicSkill.isTopicSkillId(f.skill_id)) { res.status(410).json({ code: 'skill_unavailable', error: 'This practice is no longer available.' }); return null; }
   return { f, skill };
+}
+
+// Actions on a question need the built skill.
+function requireBuilt(own, res) {
+  if (own.skill) return true;
+  res.status(409).json({ code: 'reload', error: 'Please reload this practice.' });
+  return false;
+}
+
+// Builds and saves a topic pack the first time a topic follow-up is opened.
+async function ensurePack(f, lessonText) {
+  if (topicSkill.skillForFollowup(f)) return f;
+  const text = String(lessonText || '').slice(0, topicSkill.MAX_LESSON_CHARS) || await store.getTopicLessonText(f.topic_id);
+  const pack = await topicSkill.generatePack({
+    topic: f.topic, subject: f.subject, grade: f.grade, curriculum: f.curriculum, lessonText: text, evidence: f.evidence,
+  });
+  return (await store.saveSkillPack(f.id, pack)) || store.getFollowup(f.id);
 }
 
 // Brings a session up to date (teaching method saved, a fresh question
 // chosen) and SAVES it before anything is shown. Returns the saved state.
-async function ensureSession(f, skill) {
+async function ensureSession(f0, skill0, { lessonText } = {}) {
+  const f = await ensurePack(f0, lessonText);
+  const skill = skill0 || topicSkill.skillForFollowup(f);
   const [attempt, responses] = await Promise.all([store.getAttempt(f.attempt_id), store.listResponses(f.id)]);
   const p = session.deriveProgress(responses);
   const patch = {};
@@ -87,7 +113,7 @@ async function ensureSession(f, skill) {
     if (!saved) saved = await store.getFollowup(f.id);
   }
   const fresh = saved === f ? responses : await store.listResponses(f.id);
-  return { f: saved, responses: fresh, attempt };
+  return { f: saved, responses: fresh, attempt, skill };
 }
 
 function sessionView(f, skill, responses) {
@@ -176,10 +202,35 @@ router.get('/attempts/:attemptId', requireStudentAuth, async (req, res) => {
     const attempt = await store.getAttempt(req.params.attemptId);
     if (!attempt || attempt.student_id !== req.auth.studentId) return res.status(404).json({ error: 'Not found' });
 
+    const { followups, unmapped } = await syncFollowups(attempt, req.query.topicId);
+    const responses = await store.listResponses(followups.map((f) => f.id));
+
+    const items = followups.map((f) => {
+      const names = topicSkill.displayNames(f);
+      const mine = responses.filter((r) => r.followup_id === f.id);
+      return {
+        followupId: f.id,
+        skillId: f.skill_id,
+        label: names.label,
+        shortName: names.shortName,
+        status: session.deriveProgress(mine).completed ? 'completed' : f.status,
+        evidenceCount: f.evidence_question_count,
+        outcome: session.outcomeOf(f, mine),
+        answeredCount: mine.filter((r) => r.credit !== 'pending_clarification').length,
+      };
+    });
+    res.json({ attemptId: attempt.id, originalScore: Number(attempt.score), recommendations: items, unmappedQuestions: unmapped });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+// Creates (once) and returns the follow-ups one test attempt recommends.
+async function syncFollowups(attempt, topicIdParam) {
     const { recommendations, unmapped } = recommendForAttempt(attempt);
     const existing = await store.listFollowupsForAttempt(attempt.id);
     const have = new Set(existing.map((f) => f.skill_id));
-    const topicId = UUID.test(String(req.query.topicId || '')) ? req.query.topicId : null;
+    const topicId = UUID.test(String(topicIdParam || '')) ? topicIdParam : null;
     const missing = recommendations.filter((r) => !have.has(r.skillId)).map((r) => ({
       student_id: attempt.student_id,
       attempt_id: attempt.id,
@@ -196,26 +247,27 @@ router.get('/attempts/:attemptId', requireStudentAuth, async (req, res) => {
     }));
     await store.createFollowups(missing);
     const followups = missing.length ? await store.listFollowupsForAttempt(attempt.id) : existing;
-    const responses = await store.listResponses(followups.map((f) => f.id));
+    return { followups, unmapped };
+}
 
-    const items = followups
-      .map((f) => {
-        const skill = catalog.getSkill(f.skill_id);
-        if (!skill) return null;
-        const mine = responses.filter((r) => r.followup_id === f.id);
-        return {
-          followupId: f.id,
-          skillId: f.skill_id,
-          label: skill.label,
-          shortName: skill.shortName,
-          status: session.deriveProgress(mine).completed ? 'completed' : f.status,
-          evidenceCount: f.evidence_question_count,
-          outcome: session.outcomeOf(f, mine),
-          answeredCount: mine.filter((r) => r.credit !== 'pending_clarification').length,
-        };
-      })
-      .filter(Boolean);
-    res.json({ attemptId: attempt.id, originalScore: Number(attempt.score), recommendations: items, unmappedQuestions: unmapped });
+// ── Ask Aivorah on a topic: the follow-up to open there ─────────────────
+// The newest test on this topic that recommends practice, and its first
+// unfinished follow-up (created now if needed). null when there is none.
+router.get('/for-topic', requireStudentAuth, async (req, res) => {
+  try {
+    const topic = String(req.query.topic || '').trim();
+    if (!topic || topic.length > 300) return res.status(400).json({ error: 'topic is required' });
+    const subject = String(req.query.subject || '').trim() || null;
+    const attempts = await store.listStudentTopicAttempts(req.auth.studentId, topic, subject);
+    for (const attempt of attempts) {
+      const { followups } = await syncFollowups(attempt, req.query.topicId);
+      if (!followups.length) continue;
+      const responses = await store.listResponses(followups.map((f) => f.id));
+      const open = followups.find((f) => f.status !== 'completed' && !session.deriveProgress(responses.filter((r) => r.followup_id === f.id)).completed);
+      const pick = open || followups[0];
+      return res.json({ followupId: pick.id, attemptId: attempt.id, completed: !open });
+    }
+    res.json({ followupId: null, attemptId: attempts[0]?.id || null, hasTest: attempts.length > 0 });
   } catch (err) {
     saveFailed(res, err);
   }
@@ -232,8 +284,7 @@ router.get('/parent/children/:childId', requireParentAuth, async (req, res) => {
       store.countAssessments(childId),
     ]);
     const items = followups.map((f) => {
-      const skill = catalog.getSkill(f.skill_id);
-      if (!skill) return null;
+      const skill = topicSkill.displayNames(f);
       const mine = responses.filter((r) => r.followup_id === f.id);
       const outcome = session.outcomeOf(f, mine);
       return {
@@ -275,10 +326,11 @@ router.get('/teacher/students/:studentId/skills/:skillId', requireAuth, async (r
     const { studentId, skillId } = req.params;
     const ids = UUID.test(studentId) ? await store.teacherStudentIds(req.auth.teacherId) : [];
     if (!ids.includes(studentId)) return res.status(403).json({ error: 'Not authorised.' });
-    const skill = catalog.getSkill(skillId);
-    if (!skill) return res.status(404).json({ error: 'Unknown skill' });
     const [followupsAll, responsesAll] = await Promise.all([store.listFollowupsForStudents([studentId]), store.listResponsesForStudents([studentId])]);
     const followups = followupsAll.filter((f) => f.skill_id === skillId);
+    if (!followups.length && !catalog.getSkill(skillId)) return res.status(404).json({ error: 'Unknown skill' });
+    const names = topicSkill.displayNames(followups.find((f) => f.skill_pack) || followups[0] || { skill_id: skillId });
+    const skill = { id: skillId, label: names.label, shortName: names.shortName, subject: followups[0]?.subject || catalog.getSkill(skillId)?.subject || null, nextPractice: names.nextPractice };
     const responses = responsesAll.filter((r) => r.skill_id === skillId);
     const flag = (computeTopicHelp(followups, responses).get(studentId) || []).find((x) => x.skillId === skillId) || null;
     const attempts = await store.listAttempts([...new Set(followups.map((f) => f.attempt_id))]);
@@ -309,22 +361,28 @@ router.get('/teacher/students/:studentId/skills/:skillId', requireAuth, async (r
 });
 
 // ── Student session ──────────────────────────────────────────────────────
-router.get('/:id', requireStudentAuth, async (req, res) => {
+async function openSession(req, res) {
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
-    const { f, responses } = await ensureSession(own.f, own.skill);
-    res.json(sessionView(f, own.skill, responses));
+    const lessonText = typeof req.body?.lessonText === 'string' ? req.body.lessonText : '';
+    const { f, responses, skill } = await ensureSession(own.f, own.skill, { lessonText });
+    res.json(sessionView(f, skill, responses));
   } catch (err) {
     saveFailed(res, err);
   }
-});
+}
+router.get('/:id', requireStudentAuth, openSession);
+// Same, with the lesson text the student is looking at, used (once) to
+// ground a topic skill's teaching and questions.
+router.post('/:id/open', requireStudentAuth, openSession);
 
 router.get('/:id/details', requireStudentAuth, async (req, res) => {
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
     const responses = await store.listResponses(own.f.id);
+    if (!own.skill) return res.json({ followupId: own.f.id, skill: { id: own.f.skill_id, ...topicSkill.displayNames(own.f) }, topic: own.f.topic, outcome: session.outcomeOf(own.f, responses), questions: [] });
     res.json({
       followupId: own.f.id,
       skill: { id: own.skill.id, label: own.skill.label, shortName: own.skill.shortName },
@@ -343,6 +401,7 @@ router.post('/:id/explain-another-way', requireStudentAuth, async (req, res) => 
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
+    if (!requireBuilt(own, res)) return;
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 300) : '';
     // A typed message is only checked for "I don't understand"-style requests;
     // it is never passed on as an instruction.
@@ -368,6 +427,7 @@ router.post('/:id/hint', requireStudentAuth, async (req, res) => {
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
+    if (!requireBuilt(own, res)) return;
     const questionId = requireQuestionId(req, res);
     if (!questionId) return;
     const { f } = own;
@@ -389,6 +449,7 @@ router.post('/:id/solution', requireStudentAuth, async (req, res) => {
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
+    if (!requireBuilt(own, res)) return;
     const questionId = requireQuestionId(req, res);
     if (!questionId) return;
     const { f, skill } = own;
@@ -418,6 +479,7 @@ router.post('/:id/answer', requireStudentAuth, async (req, res) => {
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
+    if (!requireBuilt(own, res)) return;
     const questionId = requireQuestionId(req, res);
     if (!questionId) return;
     const { f, skill } = own;
@@ -482,6 +544,7 @@ router.post('/:id/clarify', requireStudentAuth, async (req, res) => {
   try {
     const own = await loadOwnFollowup(req, res);
     if (!own) return;
+    if (!requireBuilt(own, res)) return;
     const questionId = requireQuestionId(req, res);
     if (!questionId) return;
     const { f, skill } = own;

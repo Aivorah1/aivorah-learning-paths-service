@@ -3,7 +3,7 @@
 // the route can show a retry instead of a result that was never saved.
 const supabase = require('../supabase');
 
-const FOLLOWUP_COLS = 'id, student_id, attempt_id, skill_id, topic, topic_id, subject, grade, curriculum, original_score, evidence, evidence_question_count, status, teaching_methods_used, current_method, current_question_id, current_help, independent_streak, completed_at, created_at, updated_at';
+const FOLLOWUP_COLS = 'id, student_id, attempt_id, skill_id, topic, topic_id, subject, grade, curriculum, original_score, evidence, evidence_question_count, status, teaching_methods_used, current_method, current_question_id, current_help, independent_streak, completed_at, created_at, updated_at, skill_pack';
 const RESPONSE_COLS = 'id, followup_id, student_id, skill_id, question_id, question_type, question_text, seq, answer, reasoning, clarification, help_shown, grading_outcome, reasoning_outcome, credit, feedback, created_at, finalized_at';
 
 class StoreError extends Error {
@@ -54,6 +54,39 @@ async function updateFollowup(id, patch, { expectQuestionId } = {}) {
   const { data, error } = await q.select(FOLLOWUP_COLS);
   if (error) fail(error);
   return (data && data[0]) || null;
+}
+
+// Saves a generated topic pack once: a second, concurrent generation keeps
+// the first one (null when another request already saved one).
+async function saveSkillPack(id, pack) {
+  const { data, error } = await supabase.from('practice_followups')
+    .update({ skill_pack: pack, updated_at: new Date().toISOString() })
+    .eq('id', id).is('skill_pack', null).select(FOLLOWUP_COLS);
+  if (error) fail(error);
+  return (data && data[0]) || null;
+}
+
+// The lesson text stored for a topic (teacher-published / curated resources).
+async function getTopicLessonText(topicId) {
+  if (!topicId) return '';
+  const { data, error } = await supabase.from('topic_resources').select('static_payload')
+    .eq('topic_id', topicId).eq('resource_type', 'AI_EXPLANATION').maybeSingle();
+  if (error || !data) return '';
+  const p = data.static_payload || {};
+  const rt = p.readText || {};
+  const body = (x) => (Array.isArray(x) ? x.map((b) => (typeof b === 'string' ? b : b?.text || b?.content || '')).join(' ') : '');
+  return [rt.intro || p.intro || (typeof p.text === 'string' ? p.text : ''), body(rt.body || p.body), body(p.whatYoullLearn)].filter(Boolean).join(' ').trim();
+}
+
+// The student's latest practice tests for one topic (newest first).
+async function listStudentTopicAttempts(studentId, topic, subject) {
+  let q = supabase.from('topic_attempts')
+    .select('id, student_id, topic, subject, grade, curriculum, score, attempt_number, per_question_results, created_at')
+    .eq('student_id', studentId).eq('topic', topic).order('created_at', { ascending: false }).limit(5);
+  if (subject) q = q.eq('subject', subject);
+  const { data, error } = await q;
+  if (error) fail(error);
+  return data || [];
 }
 
 async function listResponses(followupIds) {
@@ -129,6 +162,7 @@ async function listAttempts(ids) {
 
 module.exports = {
   StoreError, getAttempt, listFollowupsForAttempt, createFollowups, getFollowup, updateFollowup,
+  saveSkillPack, getTopicLessonText, listStudentTopicAttempts,
   listResponses, insertResponse, resolvePendingResponse, listFollowupsForStudents, listResponsesForStudents,
   isParentOf, teacherStudentIds, countAssessments, listAttempts,
 };

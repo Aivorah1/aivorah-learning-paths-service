@@ -105,14 +105,34 @@ function exclusionContext(skill, attempt) {
     ...teaching.methods.map((m) => JSON.stringify(m)),
   ];
   return {
+    // Original question + its correct answer, to catch the same fact asked again in other words.
+    originalPairs: (attempt?.per_question_results || []).filter((q) => q && q.correctAnswer)
+      .map((q) => ({ question: q.question, answer: normalize(q.correctAnswer) })),
     originalQuestions: new Set((attempt?.per_question_results || []).filter(Boolean).map((q) => normalize(q.question))),
     originalBlob: normalize(original.join(' | ')),
     workedBlob: normalize(shown.join(' | ')),
   };
 }
 
+const tokens = (t) => new Set(normalize(t).split(' ').filter((w) => w.length > 2));
+// Share of words two questions have in common (0-1).
+function overlap(a, b) {
+  const A = tokens(a); const B = tokens(b);
+  if (!A.size || !B.size) return 0;
+  let both = 0;
+  for (const w of A) if (B.has(w)) both += 1;
+  return both / (A.size + B.size - both);
+}
+
 function isFresh(q, ctx) {
   if (ctx.originalQuestions.has(normalize(q.question))) return false;
+  // A reworded copy of an original test question isn't a new example either.
+  for (const o of ctx.originalQuestions) if (overlap(o, q.question) >= 0.7) return false;
+  // Same answer as an original question and similar wording: the same check again.
+  const answer = normalize(q.type === 'mcq' ? q.options?.[q.answer] : q.answers?.[0]);
+  for (const o of ctx.originalPairs || []) {
+    if (answer && o.answer && (answer === o.answer || answer.includes(o.answer) || o.answer.includes(answer)) && overlap(o.question, q.question) >= 0.3) return false;
+  }
   for (const ex of q.examples || []) {
     const e = normalize(ex);
     if (!e) continue;
@@ -170,6 +190,6 @@ function outcomeOf(followup, responses) {
 module.exports = {
   NEEDED_IN_A_ROW, MESSAGES,
   deriveProgress, initialMethod, nextMethod, teachingView,
-  exclusionContext, isFresh, pickNextQuestion, outcomeOf,
+  exclusionContext, isFresh, pickNextQuestion, outcomeOf, overlap,
   publicQuestion: catalog.publicQuestion,
 };
