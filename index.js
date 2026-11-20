@@ -22,6 +22,7 @@ app.use('/read-aloud', require('./routes/readAloud'));
 // Explain This Question / Practise This Skill per wrong question (before the /:id routes).
 app.use('/practice-followup', require('./routes/practiceQuestion'));
 app.use('/practice-followup', require('./routes/practiceFollowup'));
+app.use('/ai-teacher', require('./routes/aiTeacher'));
 
 require('./services/jobHandlers');
 
