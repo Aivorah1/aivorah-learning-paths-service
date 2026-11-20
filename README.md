@@ -66,6 +66,21 @@ Runs on `PORT` (default `3014`).
   Whisper), `POST tts` (ElevenLabs, shipped passages only, cached on
   Cloudinary). Needs `GROQ_API_KEY`, `ELEVENLABS_API_KEY` and the
   `read_aloud_levels` / `read_aloud_sessions` tables (aivorah-db `0008`).
+- `/practice-followup/*` — **Practise This Skill** (`routes/practiceFollowup.js`,
+  Firebase ID token; needs the `practice_followups` /
+  `practice_followup_responses` tables from aivorah-db `0030`). Follow-up
+  practice for one curriculum skill from one practice test (`topic_attempts`).
+  The vetted skill catalogue (teaching methods, fresh questions with answer
+  keys, hints, solutions, reasoning rubric) is in `data/practice-skills/*.json`;
+  answer keys never leave the server. Student (own data only):
+  `GET attempts/:attemptId` (recommendations), `GET :id` (resumable session),
+  `POST :id/explain-another-way|hint|solution|answer|clarify`, `GET :id/details`.
+  Parent (linked children): `GET parent/children/:childId`. Teacher (linked
+  students): `GET teacher/support` ("Needs topic help"),
+  `GET teacher/students/:studentId/skills/:skillId`. The model only classifies
+  the student's reasoning (supported / unclear / misconception); grading,
+  question choice, hint history, progress and flags are server rules. Optional
+  env: `PRACTICE_REASONING_TIMEOUT_MS` (default 20000).
 - `GET /health`
 
 ## Branching
