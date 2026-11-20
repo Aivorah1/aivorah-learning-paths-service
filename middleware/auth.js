@@ -83,4 +83,16 @@ async function requireParentAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireStudentAuth, requireParentAuth };
+// Parent OR teacher (each route still checks the link to the student).
+async function requireParentOrTeacherAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const silent = { status: () => silent, json: () => silent };
+  const asParent = header ? await resolveVerifiedUser(req, silent, 'parent') : null;
+  if (asParent) { req.auth = { uid: asParent.uid, email: asParent.email, role: 'parent', userId: asParent.userId }; return next(); }
+  const asTeacher = await resolveVerifiedUser(req, res, 'teacher');
+  if (!asTeacher) return;
+  req.auth = { uid: asTeacher.uid, email: asTeacher.email, role: 'teacher', userId: asTeacher.userId, teacherId: asTeacher.userId };
+  next();
+}
+
+module.exports = { requireAuth, requireStudentAuth, requireParentAuth, requireParentOrTeacherAuth };

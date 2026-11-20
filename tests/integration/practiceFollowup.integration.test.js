@@ -35,7 +35,7 @@ const SUPPORTED = '{"outcome":"supported","confidence":0.92}';
 
 beforeAll(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
 beforeEach(() => {
-  Object.assign(mockStore.db, { attempts: [], followups: [], responses: [], parentLinks: [], teacherLinks: [] });
+  Object.assign(mockStore.db, { attempts: [], followups: [], responses: [], parentLinks: [], teacherLinks: [], explanations: [], generated: [], users: [] });
   mockModel.mockReset();
   mockModel.mockResolvedValue(SUPPORTED);
   // The mock-up's test: 4/5 MCQs right (Q4 wrong), one right on a second try, plus the spoken question.
@@ -410,7 +410,7 @@ describe('Practise This Skill for any topic', () => {
 
   test('Ask Aivorah on a topic finds (and creates) the follow-up for the newest test on it', async () => {
     const res = await request(app).get('/practice-followup/for-topic').query({ topic: 'Quality', subject: 'English' }).set(as(`student:${RIYA}`));
-    expect(res.body).toMatchObject({ attemptId: QUALITY, completed: false });
+    expect(res.body).toMatchObject({ attemptId: QUALITY, completed: false, questionIndex: 0 });
     expect(res.body.followupId).toBe(mockStore.db.followups.find((f) => f.skill_id === 'topic:quality').id);
     const none = await request(app).get('/practice-followup/for-topic').query({ topic: 'Another story' }).set(as(`student:${RIYA}`));
     expect(none.body).toEqual({ followupId: null, attemptId: null, hasTest: false });
