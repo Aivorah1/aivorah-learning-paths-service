@@ -19,7 +19,7 @@ function createFakeStore() {
         if (db.followups.some((f) => f.attempt_id === r.attempt_id && f.skill_id === r.skill_id)) continue;
         db.followups.push({
           id: crypto.randomUUID(), teaching_methods_used: [], current_method: null, current_question_id: null,
-          current_help: 'none', independent_streak: 0, completed_at: null, created_at: now(), updated_at: now(), ...clone(r),
+          current_help: 'none', independent_streak: 0, completed_at: null, skill_pack: null, created_at: now(), updated_at: now(), ...clone(r),
         });
       }
     },
@@ -31,6 +31,17 @@ function createFakeStore() {
       if (expectQuestionId !== undefined && (f.current_question_id || null) !== expectQuestionId) return null;
       Object.assign(f, clone(patch), { updated_at: now() });
       return clone(f);
+    },
+    async saveSkillPack(id, pack) {
+      const f = db.followups.find((x) => x.id === id);
+      if (!f || f.skill_pack) return null;
+      f.skill_pack = clone(pack);
+      return clone(f);
+    },
+    async getTopicLessonText() { return db.lessonText || ''; },
+    async listStudentTopicAttempts(studentId, topic, subject) {
+      return clone(db.attempts.filter((a) => a.student_id === studentId && a.topic === topic && (!subject || a.subject === subject))
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
     },
     async listResponses(ids) {
       const set = new Set(Array.isArray(ids) ? ids : [ids]);

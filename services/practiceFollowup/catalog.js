@@ -99,4 +99,4 @@ function publicQuestion(q) {
   return base;
 }
 
-module.exports = { getSkill, listSkills, skillForQuestion, conceptOf, publicQuestion, gradeNumber, validateSkill, _reset: () => { cache = null; } };
+module.exports = { compile, getSkill, listSkills, skillForQuestion, conceptOf, publicQuestion, gradeNumber, validateSkill, _reset: () => { cache = null; } };
