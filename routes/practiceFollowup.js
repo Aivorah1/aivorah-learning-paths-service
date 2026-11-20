@@ -1,0 +1,531 @@
+/**
+ * routes/practiceFollowup.js — "Practise This Skill"
+ *
+ * Follow-up practice for one curriculum skill, started from a practice test
+ * report and done in the topic's Ask Aivorah tab. The server owns the result:
+ * who may see what, which fresh question is asked, grading against the
+ * catalogue's answer key, hint history, the saved session and the support
+ * flags. Model text never changes a score or marks a skill complete.
+ *
+ * Student (own data only, Firebase student token):
+ *   GET  /practice-followup/attempts/:attemptId        recommendations for one test
+ *   GET  /practice-followup/:id                        resumable session
+ *   POST /practice-followup/:id/explain-another-way    { message? }
+ *   POST /practice-followup/:id/hint                   { questionId }
+ *   POST /practice-followup/:id/solution               { questionId }
+ *   POST /practice-followup/:id/answer                 { questionId, answer, reasoning }
+ *   POST /practice-followup/:id/clarify                { questionId, reasoning }
+ *   GET  /practice-followup/:id/details                finalized questions, answers, feedback
+ * Parent (linked children only):
+ *   GET  /practice-followup/parent/children/:childId
+ * Teacher (their linked students only):
+ *   GET  /practice-followup/teacher/support
+ *   GET  /practice-followup/teacher/students/:studentId/skills/:skillId
+ */
+const express = require('express');
+const { requireAuth, requireStudentAuth, requireParentAuth } = require('../middleware/auth');
+const catalog = require('../services/practiceFollowup/catalog');
+const store = require('../services/practiceFollowup/store');
+const session = require('../services/practiceFollowup/session');
+const { recommendForAttempt } = require('../services/practiceFollowup/recommend');
+const { parseAnswer, gradeAnswer, correctAnswerText, wrongFeedback } = require('../services/practiceFollowup/grading');
+const reasoningCheck = require('../services/practiceFollowup/reasoning');
+const { computeTopicHelp } = require('../services/practiceFollowup/topicHelp');
+
+const router = express.Router();
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const { MESSAGES } = session;
+
+const saveFailed = (res, err) => {
+  console.error('[practice-followup] save failed:', err?.message);
+  return res.status(503).json({ code: 'save_failed', error: "Your progress couldn't be saved just now. Please try again." });
+};
+
+// ── helpers ──────────────────────────────────────────────────────────────
+async function loadOwnFollowup(req, res) {
+  if (!UUID.test(req.params.id)) { res.status(404).json({ error: 'Not found' }); return null; }
+  const f = await store.getFollowup(req.params.id);
+  // Same answer for "missing" and "someone else's": never reveals another learner's data.
+  if (!f || f.student_id !== req.auth.studentId) { res.status(404).json({ error: 'Not found' }); return null; }
+  const skill = catalog.getSkill(f.skill_id);
+  if (!skill) { res.status(410).json({ code: 'skill_unavailable', error: 'This practice is no longer available.' }); return null; }
+  return { f, skill };
+}
+
+// Brings a session up to date (teaching method saved, a fresh question
+// chosen) and SAVES it before anything is shown. Returns the saved state.
+async function ensureSession(f, skill) {
+  const [attempt, responses] = await Promise.all([store.getAttempt(f.attempt_id), store.listResponses(f.id)]);
+  const p = session.deriveProgress(responses);
+  const patch = {};
+  if (p.completed) {
+    if (f.status !== 'completed') Object.assign(patch, { status: 'completed', completed_at: p.completedAt, independent_streak: session.NEEDED_IN_A_ROW, current_question_id: null, current_help: 'none' });
+  } else {
+    if (!f.current_method) {
+      const m = session.initialMethod(skill, f);
+      patch.current_method = m;
+      patch.teaching_methods_used = [...(f.teaching_methods_used || []), m];
+    }
+    if (f.status === 'available') patch.status = 'in_progress';
+    if (f.independent_streak !== p.streak) patch.independent_streak = p.streak;
+    if (!p.pending) {
+      const currentOk = f.current_question_id && !p.answeredIds.has(f.current_question_id) && skill._byId.has(f.current_question_id);
+      if (!currentOk) {
+        const ctx = session.exclusionContext(skill, attempt);
+        const next = session.pickNextQuestion(skill, ctx, { usedIds: p.answeredIds, lastType: p.last?.question_type });
+        if ((next?.id || null) !== (f.current_question_id || null)) {
+          patch.current_question_id = next ? next.id : null;
+          patch.current_help = 'none';
+        }
+      }
+    }
+  }
+  let saved = f;
+  if (Object.keys(patch).length) {
+    saved = await store.updateFollowup(f.id, patch, { expectQuestionId: f.current_question_id || null });
+    // Another request moved it on first: show what is saved now.
+    if (!saved) saved = await store.getFollowup(f.id);
+  }
+  const fresh = saved === f ? responses : await store.listResponses(f.id);
+  return { f: saved, responses: fresh, attempt };
+}
+
+function sessionView(f, skill, responses) {
+  const p = session.deriveProgress(responses);
+  const pendingQ = p.pending ? skill._byId.get(p.pending.question_id) : null;
+  const q = !p.completed && !p.pending && f.current_question_id ? skill._byId.get(f.current_question_id) : null;
+  const view = {
+    followupId: f.id,
+    attemptId: f.attempt_id,
+    skill: { id: skill.id, label: skill.label, shortName: skill.shortName },
+    topic: f.topic, subject: f.subject, grade: f.grade,
+    originalScore: f.original_score != null ? Number(f.original_score) : null,
+    status: p.completed ? 'completed' : f.status,
+    progress: { confirmed: p.streak, needed: session.NEEDED_IN_A_ROW },
+    teaching: session.teachingView(skill, f.current_method || session.initialMethod(skill, f), f),
+    question: q ? { ...session.publicQuestion(q), number: responses.length + 1, helpShown: f.current_help, hint: f.current_help === 'hint' ? q.hint : null } : null,
+    clarification: pendingQ ? {
+      questionId: pendingQ.id,
+      question: session.publicQuestion(pendingQ),
+      yourAnswer: p.pending.answer,
+      prompt: MESSAGES.clarify,
+    } : null,
+    unavailable: !p.completed && !q && !pendingQ ? MESSAGES.unavailable : null,
+    complete: p.completed ? { title: MESSAGES.completeTitle, body: MESSAGES.completeBody } : null,
+    outcome: session.outcomeOf(f, responses),
+    answeredCount: responses.length,
+  };
+  return view;
+}
+
+function responseView(skill, r) {
+  const q = skill._byId.get(r.question_id);
+  return {
+    seq: r.seq,
+    questionId: r.question_id,
+    type: r.question_type,
+    question: r.question_text,
+    options: q?.type === 'mcq' ? q.options : null,
+    yourAnswer: r.answer,
+    yourReasoning: r.reasoning,
+    clarification: r.clarification,
+    helpUsed: r.help_shown,
+    correct: r.grading_outcome === 'correct',
+    gradingOutcome: r.grading_outcome,
+    reasoningOutcome: r.reasoning_outcome,
+    credit: r.credit,
+    feedback: r.feedback,
+    // A finalized question's answer is released for review.
+    correctAnswer: r.credit !== 'pending_clarification' && q ? correctAnswerText(q) : null,
+    answeredAt: r.finalized_at || r.created_at,
+  };
+}
+
+// After a question is finalized: next fresh question, and a new teaching
+// method after two wrong answers in a row. Saved with a compare-and-set on
+// the question just answered, so a repeat can't advance twice.
+async function advanceAfter(f, skill, responses, answeredQuestionId) {
+  const attempt = await store.getAttempt(f.attempt_id);
+  const p = session.deriveProgress(responses);
+  const patch = { independent_streak: p.streak, current_help: 'none', status: p.completed ? 'completed' : 'in_progress' };
+  if (p.completed) {
+    Object.assign(patch, { completed_at: p.completedAt, current_question_id: null });
+  } else if (!p.pending) {
+    const next = session.pickNextQuestion(skill, session.exclusionContext(skill, attempt), { usedIds: p.answeredIds, lastType: p.last?.question_type });
+    patch.current_question_id = next ? next.id : null;
+    if (p.lastTwoIncorrect) {
+      const m = session.nextMethod(skill, f.teaching_methods_used);
+      patch.current_method = m.id;
+      patch.teaching_methods_used = [...(f.teaching_methods_used || []), m.id];
+    }
+  }
+  const saved = await store.updateFollowup(f.id, patch, { expectQuestionId: answeredQuestionId });
+  return saved || store.getFollowup(f.id);
+}
+
+function requireQuestionId(req, res) {
+  const id = String(req.body?.questionId || '');
+  if (!id || id.length > 64) { res.status(400).json({ error: 'questionId is required' }); return null; }
+  return id;
+}
+
+// ── Recommendations for one test report ─────────────────────────────────
+router.get('/attempts/:attemptId', requireStudentAuth, async (req, res) => {
+  try {
+    if (!UUID.test(req.params.attemptId)) return res.status(404).json({ error: 'Not found' });
+    const attempt = await store.getAttempt(req.params.attemptId);
+    if (!attempt || attempt.student_id !== req.auth.studentId) return res.status(404).json({ error: 'Not found' });
+
+    const { recommendations, unmapped } = recommendForAttempt(attempt);
+    const existing = await store.listFollowupsForAttempt(attempt.id);
+    const have = new Set(existing.map((f) => f.skill_id));
+    const topicId = UUID.test(String(req.query.topicId || '')) ? req.query.topicId : null;
+    const missing = recommendations.filter((r) => !have.has(r.skillId)).map((r) => ({
+      student_id: attempt.student_id,
+      attempt_id: attempt.id,
+      skill_id: r.skillId,
+      topic: attempt.topic,
+      topic_id: topicId,
+      subject: attempt.subject,
+      grade: attempt.grade,
+      curriculum: attempt.curriculum || '',
+      original_score: attempt.score,
+      evidence: r.evidence,
+      evidence_question_count: r.evidence.length,
+      status: 'available',
+    }));
+    await store.createFollowups(missing);
+    const followups = missing.length ? await store.listFollowupsForAttempt(attempt.id) : existing;
+    const responses = await store.listResponses(followups.map((f) => f.id));
+
+    const items = followups
+      .map((f) => {
+        const skill = catalog.getSkill(f.skill_id);
+        if (!skill) return null;
+        const mine = responses.filter((r) => r.followup_id === f.id);
+        return {
+          followupId: f.id,
+          skillId: f.skill_id,
+          label: skill.label,
+          shortName: skill.shortName,
+          status: session.deriveProgress(mine).completed ? 'completed' : f.status,
+          evidenceCount: f.evidence_question_count,
+          outcome: session.outcomeOf(f, mine),
+          answeredCount: mine.filter((r) => r.credit !== 'pending_clarification').length,
+        };
+      })
+      .filter(Boolean);
+    res.json({ attemptId: attempt.id, originalScore: Number(attempt.score), recommendations: items, unmappedQuestions: unmapped });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+// ── Parent: linked child's saved follow-up outcomes ─────────────────────
+router.get('/parent/children/:childId', requireParentAuth, async (req, res) => {
+  try {
+    const { childId } = req.params;
+    if (!UUID.test(childId) || !(await store.isParentOf(req.auth.email, childId))) return res.status(403).json({ error: 'Not authorised.' });
+    const [followups, responses, assessments] = await Promise.all([
+      store.listFollowupsForStudents([childId]),
+      store.listResponsesForStudents([childId]),
+      store.countAssessments(childId),
+    ]);
+    const items = followups.map((f) => {
+      const skill = catalog.getSkill(f.skill_id);
+      if (!skill) return null;
+      const mine = responses.filter((r) => r.followup_id === f.id);
+      const outcome = session.outcomeOf(f, mine);
+      return {
+        followupId: f.id,
+        topic: f.topic,
+        subject: f.subject,
+        skill: skill.shortName,
+        skillLabel: skill.label,
+        originalScore: f.original_score != null ? Number(f.original_score) : null,
+        status: outcome.code === 'completed' ? 'completed' : f.status,
+        outcome: outcome.parentText,
+        outcomeLabel: outcome.label,
+        updatedAt: f.completed_at || (mine[mine.length - 1]?.finalized_at) || f.updated_at,
+      };
+    }).filter(Boolean);
+    // Tutoring conversations are never included: only saved outcomes.
+    res.json({ childId, hasAssessments: assessments > 0, followups: items });
+  } catch (err) {
+    console.error('[practice-followup] parent view failed:', err.message);
+    res.status(500).json({ error: 'Could not load learning follow-up.' });
+  }
+});
+
+// ── Teacher: Needs topic help for their students ────────────────────────
+router.get('/teacher/support', requireAuth, async (req, res) => {
+  try {
+    const ids = await store.teacherStudentIds(req.auth.teacherId);
+    const [followups, responses] = await Promise.all([store.listFollowupsForStudents(ids), store.listResponsesForStudents(ids)]);
+    const flags = computeTopicHelp(followups, responses);
+    res.json({ students: [...flags.entries()].map(([studentId, topicHelp]) => ({ studentId, topicHelp })) });
+  } catch (err) {
+    console.error('[practice-followup] teacher support failed:', err.message);
+    res.status(500).json({ error: 'Could not load topic help.' });
+  }
+});
+
+router.get('/teacher/students/:studentId/skills/:skillId', requireAuth, async (req, res) => {
+  try {
+    const { studentId, skillId } = req.params;
+    const ids = UUID.test(studentId) ? await store.teacherStudentIds(req.auth.teacherId) : [];
+    if (!ids.includes(studentId)) return res.status(403).json({ error: 'Not authorised.' });
+    const skill = catalog.getSkill(skillId);
+    if (!skill) return res.status(404).json({ error: 'Unknown skill' });
+    const [followupsAll, responsesAll] = await Promise.all([store.listFollowupsForStudents([studentId]), store.listResponsesForStudents([studentId])]);
+    const followups = followupsAll.filter((f) => f.skill_id === skillId);
+    const responses = responsesAll.filter((r) => r.skill_id === skillId);
+    const flag = (computeTopicHelp(followups, responses).get(studentId) || []).find((x) => x.skillId === skillId) || null;
+    const attempts = await store.listAttempts([...new Set(followups.map((f) => f.attempt_id))]);
+    const recentAttempts = followups.slice(0, 5).map((f) => {
+      const a = attempts.find((x) => x.id === f.attempt_id) || {};
+      const mine = responses.filter((r) => r.followup_id === f.id);
+      const outcome = session.outcomeOf(f, mine);
+      return {
+        attemptId: f.attempt_id, topic: f.topic, subject: f.subject,
+        score: a.score != null ? Number(a.score) : (f.original_score != null ? Number(f.original_score) : null),
+        takenAt: a.created_at || f.created_at,
+        questions: (f.evidence || []).map((e) => ({ question: e.question, kind: e.kind })),
+        followupStatus: outcome.code, followupOutcome: outcome.parentText,
+      };
+    });
+    res.json({
+      studentId,
+      skill: { id: skill.id, label: skill.label, shortName: skill.shortName, subject: skill.subject },
+      needsTopicHelp: !!flag,
+      flag,
+      practiseNext: skill.nextPractice,
+      recentAttempts,
+    });
+  } catch (err) {
+    console.error('[practice-followup] teacher skill view failed:', err.message);
+    res.status(500).json({ error: 'Could not load skill progress.' });
+  }
+});
+
+// ── Student session ──────────────────────────────────────────────────────
+router.get('/:id', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const { f, responses } = await ensureSession(own.f, own.skill);
+    res.json(sessionView(f, own.skill, responses));
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+router.get('/:id/details', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const responses = await store.listResponses(own.f.id);
+    res.json({
+      followupId: own.f.id,
+      skill: { id: own.skill.id, label: own.skill.label, shortName: own.skill.shortName },
+      topic: own.f.topic,
+      outcome: session.outcomeOf(own.f, responses),
+      questions: responses.filter((r) => r.credit !== 'pending_clarification').map((r) => responseView(own.skill, r)),
+    });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+const NEED_ANOTHER_WAY = /(don'?t|do not|dont|didn'?t|not)\s+(understand|get|like|follow)|confus|another way|different way|explain (it |that )?again|not clear|makes? no sense|too hard|\bhuh\b|what\?/i;
+
+router.post('/:id/explain-another-way', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 300) : '';
+    // A typed message is only checked for "I don't understand"-style requests;
+    // it is never passed on as an instruction.
+    if (message && !NEED_ANOTHER_WAY.test(message)) {
+      return res.json({ understood: false, reply: "I can explain this skill another way, give you a hint, or you can try the question. Tap Explain Another Way for a new explanation." });
+    }
+    const m = session.nextMethod(own.skill, own.f.teaching_methods_used);
+    // Saved before it is shown, so a refresh never repeats this method.
+    const saved = await store.updateFollowup(own.f.id, {
+      current_method: m.id,
+      teaching_methods_used: [...(own.f.teaching_methods_used || []), m.id],
+      ...(own.f.status === 'available' ? { status: 'in_progress' } : {}),
+    });
+    if (!saved) return res.status(409).json({ code: 'reload', error: 'Please reload.' });
+    const responses = await store.listResponses(saved.id);
+    res.json({ understood: true, repeated: m.repeated, session: sessionView(saved, own.skill, responses) });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+router.post('/:id/hint', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const questionId = requireQuestionId(req, res);
+    if (!questionId) return;
+    const { f } = own;
+    if (f.current_question_id !== questionId || f.status === 'completed') return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
+    const q = own.skill._byId.get(questionId);
+    if (f.current_help === 'none') {
+      // Save that help was shown BEFORE showing it: this question can no
+      // longer earn independent credit.
+      const saved = await store.updateFollowup(f.id, { current_help: 'hint' }, { expectQuestionId: questionId });
+      if (!saved) return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
+    }
+    res.json({ questionId, hint: q.hint, helpShown: 'hint' });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+router.post('/:id/solution', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const questionId = requireQuestionId(req, res);
+    if (!questionId) return;
+    const { f, skill } = own;
+    const q = skill._byId.get(questionId);
+    const responses = await store.listResponses(f.id);
+    const existing = responses.find((r) => r.question_id === questionId);
+    if (existing) return res.json({ duplicate: true, solution: q?.solution, correctAnswer: q ? correctAnswerText(q) : null, session: sessionView(f, skill, responses) });
+    if (f.current_question_id !== questionId || f.status === 'completed') return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
+    const inserted = await store.insertResponse({
+      followup_id: f.id, student_id: f.student_id, skill_id: f.skill_id,
+      question_id: q.id, question_type: q.type, question_text: q.question,
+      seq: responses.length + 1,
+      answer: null, reasoning: null,
+      help_shown: 'solution', grading_outcome: 'not_answered', reasoning_outcome: 'not_evaluated', credit: 'none',
+      feedback: q.solution, finalized_at: new Date().toISOString(),
+    });
+    if (inserted.duplicate) return res.status(409).json({ code: 'reload', error: 'Please reload.' });
+    const all = [...responses, inserted.row];
+    const saved = await advanceAfter(f, skill, all, questionId);
+    res.json({ solution: q.solution, correctAnswer: correctAnswerText(q), message: MESSAGES.solution, session: sessionView(saved, skill, all) });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+router.post('/:id/answer', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const questionId = requireQuestionId(req, res);
+    if (!questionId) return;
+    const { f, skill } = own;
+    const q = skill._byId.get(questionId);
+    const responses = await store.listResponses(f.id);
+
+    // A repeated submit (double tap, retry after a timeout) returns the saved
+    // result and adds no new evidence.
+    const existing = responses.find((r) => r.question_id === questionId);
+    if (existing) return res.json({ duplicate: true, result: resultView(skill, existing), session: sessionView(f, skill, responses) });
+    if (!q || f.current_question_id !== questionId || f.status === 'completed') {
+      return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
+    }
+    if (responses.some((r) => r.credit === 'pending_clarification')) return res.status(409).json({ code: 'clarification_pending', error: 'Finish your explanation first.' });
+
+    const parsed = parseAnswer(q, req.body?.answer);
+    if (!parsed) return res.status(400).json({ error: q.type === 'mcq' ? 'Choose one option.' : 'Type a short answer.' });
+    const reasoning = reasoningCheck.cleanReasoning(req.body?.reasoning);
+    const correct = gradeAnswer(q, parsed);
+    const helped = f.current_help === 'hint';
+
+    let row;
+    if (!correct) {
+      row = { grading_outcome: 'incorrect', reasoning_outcome: 'not_evaluated', credit: 'none', feedback: `${MESSAGES.incorrectLead}${wrongFeedback(q, parsed)}${MESSAGES.incorrectNext}` };
+    } else if (helped) {
+      row = { grading_outcome: 'correct', reasoning_outcome: 'not_evaluated', credit: 'assisted', feedback: MESSAGES.assisted };
+    } else {
+      const ev = await reasoningCheck.evaluateReasoning({ skill, question: q, answerText: parsed.text, reasoning });
+      if (ev.outcome === 'unable_to_evaluate') {
+        // Never guess: nothing is saved; the student can submit again.
+        return res.status(503).json({ code: 'evaluation_unavailable', error: MESSAGES.evaluationUnavailable });
+      }
+      if (ev.outcome === 'supported') row = { grading_outcome: 'correct', reasoning_outcome: 'supported', credit: 'independent', feedback: MESSAGES.independent };
+      else if (ev.outcome === 'unclear') row = { grading_outcome: 'correct', reasoning_outcome: 'unclear', credit: 'pending_clarification', feedback: MESSAGES.clarify };
+      else row = { grading_outcome: 'correct', reasoning_outcome: 'misconception', credit: 'none', feedback: `${ev.feedback || skill.rubric.misconceptionFeedback} Let's try another new question.` };
+    }
+
+    const inserted = await store.insertResponse({
+      followup_id: f.id, student_id: f.student_id, skill_id: f.skill_id,
+      question_id: q.id, question_type: q.type, question_text: q.question,
+      seq: responses.length + 1,
+      answer: parsed.text, reasoning: reasoning || null,
+      help_shown: helped ? 'hint' : 'none',
+      ...row,
+      finalized_at: row.credit === 'pending_clarification' ? null : new Date().toISOString(),
+    });
+    if (inserted.duplicate) {
+      const now = await store.listResponses(f.id);
+      const saved = now.find((r) => r.question_id === questionId);
+      return res.json({ duplicate: true, result: saved ? resultView(skill, saved) : null, session: sessionView(f, skill, now) });
+    }
+    const all = [...responses, inserted.row];
+    let saved = f;
+    if (row.credit !== 'pending_clarification') saved = await advanceAfter(f, skill, all, questionId);
+    res.json({ result: resultView(skill, inserted.row), session: sessionView(saved, skill, all) });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+router.post('/:id/clarify', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    const questionId = requireQuestionId(req, res);
+    if (!questionId) return;
+    const { f, skill } = own;
+    const responses = await store.listResponses(f.id);
+    const r = responses.find((x) => x.question_id === questionId);
+    if (!r) return res.status(409).json({ code: 'stale', error: 'Please reload.' });
+    if (r.credit !== 'pending_clarification') return res.json({ duplicate: true, result: resultView(skill, r), session: sessionView(f, skill, responses) });
+
+    const q = skill._byId.get(questionId);
+    const clarification = reasoningCheck.cleanReasoning(req.body?.reasoning);
+    if (!clarification) return res.status(400).json({ error: 'Tell me why in a few words.' });
+    const combined = [r.reasoning, clarification].filter(Boolean).join(' ');
+    const ev = await reasoningCheck.evaluateReasoning({ skill, question: q, answerText: r.answer, reasoning: combined.slice(0, reasoningCheck.MAX_REASONING_CHARS) });
+    if (ev.outcome === 'unable_to_evaluate') return res.status(503).json({ code: 'evaluation_unavailable', error: MESSAGES.evaluationUnavailable });
+
+    const patch = ev.outcome === 'supported'
+      ? { reasoning_outcome: 'supported', credit: 'independent', feedback: MESSAGES.independent }
+      : ev.outcome === 'misconception'
+        ? { reasoning_outcome: 'misconception', credit: 'none', feedback: `${ev.feedback || skill.rubric.misconceptionFeedback} Let's try another new question.` }
+        : { reasoning_outcome: 'unclear', credit: 'none', feedback: MESSAGES.clarifyUnclear };
+    const updated = await store.resolvePendingResponse(r.id, { ...patch, clarification, finalized_at: new Date().toISOString() });
+    if (!updated) {
+      const now = await store.listResponses(f.id);
+      const saved = now.find((x) => x.id === r.id);
+      return res.json({ duplicate: true, result: saved ? resultView(skill, saved) : null, session: sessionView(f, skill, now) });
+    }
+    const all = responses.map((x) => (x.id === r.id ? updated : x));
+    const saved = await advanceAfter(f, skill, all, f.current_question_id || null);
+    res.json({ result: resultView(skill, updated), session: sessionView(saved, skill, all) });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+function resultView(skill, r) {
+  const v = responseView(skill, r);
+  const code = r.credit === 'independent' ? 'independent'
+    : r.credit === 'assisted' ? 'assisted'
+    : r.credit === 'pending_clarification' ? 'clarify'
+    : r.help_shown === 'solution' ? 'solution'
+    : r.grading_outcome === 'incorrect' ? 'incorrect'
+    : r.reasoning_outcome === 'misconception' ? 'misconception' : 'unclear';
+  return { ...v, code, message: r.feedback, correctAnswer: code === 'clarify' ? null : v.correctAnswer };
+}
+
+module.exports = router;
+module.exports._test = { ensureSession, sessionView, NEED_ANOTHER_WAY };

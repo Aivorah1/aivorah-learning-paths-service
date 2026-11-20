@@ -1,0 +1,266 @@
+{
+  "id": "en.figurative.pun-vs-alliteration",
+  "version": 1,
+  "label": "Telling puns and alliteration apart",
+  "shortName": "Puns and alliteration",
+  "subject": "English",
+  "subjectPattern": "english",
+  "grades": [5, 6, 7, 8, 9, 10],
+  "curriculumRefs": [
+    { "board": "CBSE", "grade": 8, "subject": "English", "book": "Poorvi", "bookCode": "hepr1", "unit": "Unit 1, Wit and Wisdom", "piece": "A Concrete Example", "pdf": "hepr101.pdf" },
+    { "board": "CBSE", "grade": 6, "subject": "English", "book": "Poorvi", "note": "alliteration is taught in the poem exercises of Unit 1" }
+  ],
+  "match": {
+    "patterns": ["\\bpuns?\\b", "\\balliterat", "play on words", "word ?play"]
+  },
+  "concepts": {
+    "pun": "\\bpuns?\\b|play on words|word ?play|two meanings|double meaning",
+    "alliteration": "alliterat|same (starting|beginning|first) (sound|letter)"
+  },
+  "nextPractice": "Spot the double meaning (pun) versus the repeated starting sound (alliteration) in short sentences.",
+  "teaching": {
+    "refresher": {
+      "title": "Quick refresher",
+      "body": "A pun is a play on words: one word (or two words that sound alike) has two meanings, and that makes it funny. Alliteration is when words close together start with the same sound. Ask yourself: is there a double meaning? Then it is a pun. Is a starting sound repeated? Then it is alliteration.",
+      "examples": [
+        { "label": "Pun", "text": "“I used to be a baker, but I couldn't make enough dough.” (dough = bread mix and money)" },
+        { "label": "Alliteration", "text": "“Busy bees buzz.” (b, b, b)" }
+      ]
+    },
+    "methods": [
+      {
+        "id": "definition",
+        "name": "Definition",
+        "title": "What each one means",
+        "body": "A pun is a play on words that uses a word with two meanings (or words that sound alike) to create humour. Alliteration is the repetition of the same starting sound in nearby words.",
+        "examples": [
+          { "label": "Pun", "text": "“I used to be a baker, but I couldn't make enough dough.” Dough is the bread mix and also a slang word for money." },
+          { "label": "Alliteration", "text": "“Busy bees buzz.” Three words in a row start with the b sound." }
+        ]
+      },
+      {
+        "id": "side_by_side",
+        "name": "Side-by-side comparison",
+        "title": "Put them side by side",
+        "body": "Puns are about MEANING. Alliteration is about SOUND. Check each sentence with two quick tests.",
+        "table": [
+          ["", "Pun", "Alliteration"],
+          ["Look for", "a word that means two things", "the same first sound again and again"],
+          ["Quick test", "Can this word mean something else here?", "Say the first sound of each word aloud"],
+          ["Example", "“The maths book looked sad because it had too many problems.”", "“Silly snakes slide slowly.”"]
+        ]
+      },
+      {
+        "id": "visual",
+        "name": "Picture it",
+        "title": "Picture it",
+        "body": "Imagine a pun as one word wearing two hats. In “The maths book looked sad because it had too many problems,” the word problems wears a homework hat (sums to solve) and a worry hat (troubles). Now imagine alliteration as a row of beads that are all the same colour: in “Fat frogs flop,” every bead is an f.",
+        "examples": [
+          { "label": "Two hats (pun)", "text": "problems = sums to solve + troubles" },
+          { "label": "Same-colour beads (alliteration)", "text": "Fat · frogs · flop" }
+        ]
+      },
+      {
+        "id": "guided_steps",
+        "name": "Step by step",
+        "title": "Check it step by step",
+        "body": "Use these steps on any sentence.",
+        "steps": [
+          "Read the sentence aloud.",
+          "Listen to the start of each word. Do several nearby words begin with the same sound? That is alliteration.",
+          "Now look for one word that could mean two different things here. If it does, and it makes a little joke, that is a pun.",
+          "A sentence can have both. Answer the one the question asks about."
+        ],
+        "examples": [
+          { "label": "Try it", "text": "“The fisherman was a reel hero.” Step 3: reel (fishing reel) sounds like real. Two meanings, so it is a pun." }
+        ]
+      }
+    ],
+    "confusions": [
+      {
+        "id": "chose_alliteration_for_pun",
+        "whenQuestionConcept": "pun",
+        "whenStudentAnswer": "alliterative",
+        "text": "In your test, the question asked for a pun, but you chose a sentence with alliteration. Alliteration is about sounds at the start of words (“Busy bees buzz”). A pun is about meaning: one word does two jobs (“make enough dough” = bread dough and money). Look for the double meaning, not the repeated sound."
+      },
+      {
+        "id": "chose_pun_for_alliteration",
+        "whenQuestionConcept": "alliteration",
+        "whenStudentAnswer": "not_alliterative",
+        "text": "In your test, the question asked for alliteration, but you chose a sentence without a repeated starting sound. Alliteration is about sound (“Busy bees buzz”); a pun is about a word with two meanings. Say the first sound of each word aloud to check."
+      }
+    ]
+  },
+  "rubric": {
+    "keyIdeas": [
+      "A pun depends on a word or phrase with two meanings, or on words that sound alike but mean different things.",
+      "Alliteration is the same starting sound repeated in words that are close together."
+    ],
+    "acceptableSimpleWording": [
+      "the word means two things",
+      "it sounds like another word",
+      "it's a joke with a word",
+      "they all start with the same letter",
+      "same sound at the start"
+    ],
+    "misconceptionRules": [
+      {
+        "id": "sound_used_for_pun",
+        "whenConcept": "pun",
+        "reasoningMatches": "same (first |starting |beginning )?(letter|sound)|start(s|ing)? with the same|rhym",
+        "unlessMatches": "two meanings|double meaning|means (two|2)|sounds like|other meaning|different meaning|also means",
+        "feedback": "Your answer is right, but a pun is not about words starting with the same sound — that is alliteration. A pun works because a word has two meanings or sounds like another word."
+      },
+      {
+        "id": "meaning_used_for_alliteration",
+        "whenConcept": "alliteration",
+        "reasoningMatches": "two meanings|double meaning|it'?s a joke|funny|sounds like",
+        "unlessMatches": "same (first |starting |beginning )?(letter|sound)|start(s|ing)? with",
+        "feedback": "Your answer is right, but alliteration is not about a double meaning or a joke — that is a pun. Alliteration is the same starting sound repeated in nearby words."
+      }
+    ],
+    "misconceptionFeedback": "Your answer is right, but the reason mixes up the two ideas. A pun is about a word with two meanings; alliteration is about the same starting sound repeated."
+  },
+  "questions": [
+    {
+      "id": "pa-mcq-01",
+      "type": "mcq",
+      "concept": "pun",
+      "question": "Which sentence contains a pun?",
+      "options": ["The bicycle couldn't stand up by itself because it was two-tired.", "Busy birds built a nest."],
+      "answer": 0,
+      "examples": ["two-tired", "busy birds built"],
+      "hint": "Look for a word that sounds like another word but means something different.",
+      "solution": "“Two-tired” sounds like “too tired”. A bicycle has two tyres, and it is also too tired to stand: one phrase, two meanings. That is a pun. “Busy birds built” repeats the b sound, which is alliteration.",
+      "whyWrong": { "1": "“Busy birds built” repeats the b sound at the start of the words. That is alliteration, not a pun. Look for the word with two meanings instead." }
+    },
+    {
+      "id": "pa-mcq-02",
+      "type": "mcq",
+      "concept": "alliteration",
+      "question": "Which sentence uses alliteration?",
+      "options": ["I'm reading a book about glue — I can't put it down.", "Peter's purple parrot preened proudly.", "The library was quiet today."],
+      "answer": 1,
+      "examples": ["book about glue", "purple parrot"],
+      "hint": "Say the first sound of each word aloud. Which sentence repeats one sound again and again?",
+      "solution": "“Peter's purple parrot preened proudly” repeats the p sound at the start of five words. That is alliteration. The glue sentence is a pun (“can't put it down” = it's stuck, and it's exciting).",
+      "whyWrong": {
+        "0": "The glue sentence is a pun: “can't put it down” means the book is stuck to your hands and also that it is exciting. Alliteration is about the same starting sound.",
+        "2": "“The library was quiet today” has no repeated starting sound and no double meaning. Look for the sentence where the same first sound keeps coming back."
+      }
+    },
+    {
+      "id": "pa-mcq-03",
+      "type": "mcq",
+      "concept": "pun",
+      "question": "Which sentence contains a pun?",
+      "options": ["Seven slippery seals swam south.", "The scarecrow won an award because he was outstanding in his field."],
+      "answer": 1,
+      "examples": ["seven slippery seals", "outstanding in his field"],
+      "hint": "One of these sentences has a phrase that could mean two things for a scarecrow.",
+      "solution": "“Outstanding in his field” means excellent at his job, and a scarecrow really does stand out in a field. Two meanings make it a pun. “Seven slippery seals swam south” repeats the s sound: alliteration.",
+      "whyWrong": { "0": "“Seven slippery seals swam south” repeats the s sound — that is alliteration. A pun needs a word or phrase with two meanings." }
+    },
+    {
+      "id": "pa-mcq-04",
+      "type": "mcq",
+      "concept": "pun",
+      "question": "“The tailor's business was going sew-sew.” Why is this a pun?",
+      "options": ["Because “sew-sew” sounds like “so-so”, and a tailor sews.", "Because the words start with the same sound.", "Because the sentence rhymes."],
+      "answer": 0,
+      "examples": ["sew-sew"],
+      "hint": "Say “sew-sew” aloud. What everyday word does it sound like?",
+      "solution": "“Sew-sew” sounds like “so-so” (not very good), and sewing is what a tailor does. A sound-alike with two meanings is a pun.",
+      "whyWrong": {
+        "1": "Starting sounds are what alliteration is about. This sentence is funny because “sew-sew” sounds like another word with a different meaning.",
+        "2": "Nothing in this sentence rhymes. The joke comes from “sew-sew” sounding like “so-so”."
+      }
+    },
+    {
+      "id": "pa-mcq-05",
+      "type": "mcq",
+      "concept": "pun",
+      "question": "“Why did the cookie go to the doctor? Because it felt crummy.” This joke uses:",
+      "options": ["alliteration", "a pun"],
+      "answer": 1,
+      "examples": ["crummy", "cookie go to the doctor"],
+      "hint": "What are crumbs? What does it mean to feel “crummy”?",
+      "solution": "“Crummy” means feeling unwell, and a cookie is full of crumbs. One word, two meanings: a pun.",
+      "whyWrong": { "0": "The words in this joke don't keep starting with the same sound. The joke works because “crummy” has two meanings — that is a pun." }
+    },
+    {
+      "id": "pa-mcq-06",
+      "type": "mcq",
+      "concept": "alliteration",
+      "question": "Which line is alliteration, not a pun?",
+      "options": ["Twelve tiny turtles tiptoed together.", "Why are fish so clever? They live in schools."],
+      "answer": 0,
+      "examples": ["twelve tiny turtles", "live in schools"],
+      "hint": "Which line keeps repeating one starting sound?",
+      "solution": "“Twelve tiny turtles tiptoed together” repeats the t sound: alliteration. The fish joke is a pun: a school of fish, and a school where you learn.",
+      "whyWrong": { "1": "The fish line is a pun: “schools” means groups of fish and places to learn. Alliteration is the line that repeats the same starting sound." }
+    },
+    {
+      "id": "pa-fill-01",
+      "type": "fill_blank",
+      "concept": "pun",
+      "question": "In “The calendar's days are numbered,” the word numbered creates a ____.",
+      "answers": ["pun"],
+      "accept": ["a pun", "play on words", "a play on words", "wordplay", "word play"],
+      "examples": ["days are numbered"],
+      "hint": "A calendar's days really have numbers. What else can “your days are numbered” mean?",
+      "solution": "A calendar's days have numbers on them, and “your days are numbered” also means something will not last long. Two meanings: a pun.",
+      "wrongFeedback": "“Numbered” works in two ways here: the dates on a calendar have numbers, and “days are numbered” means time is running out. A word with two meanings makes a pun."
+    },
+    {
+      "id": "pa-fill-02",
+      "type": "fill_blank",
+      "concept": "alliteration",
+      "question": "“Daring dolphins dive deep” repeats the d sound at the start of words. This is called ____.",
+      "answers": ["alliteration"],
+      "accept": [],
+      "allowTypos": true,
+      "examples": ["daring dolphins"],
+      "hint": "It is the name for repeating the same starting sound in nearby words. It starts with “a”.",
+      "solution": "Repeating the same starting sound in nearby words is called alliteration: daring, dolphins, dive, deep.",
+      "wrongFeedback": "When the same starting sound is repeated in words close together, it is called alliteration."
+    },
+    {
+      "id": "pa-fill-03",
+      "type": "fill_blank",
+      "concept": "pun",
+      "question": "“I'm on a seafood diet — I see food and I eat it.” Because “seafood” and “see food” sound alike but mean different things, this joke is a ____.",
+      "answers": ["pun"],
+      "accept": ["a pun", "play on words", "a play on words", "wordplay", "word play"],
+      "examples": ["seafood diet", "see food"],
+      "hint": "Sound-alike words with different meanings are the key to this kind of joke.",
+      "solution": "“Seafood” (fish) and “see food” (any food you can see) sound the same but mean different things. That is a pun.",
+      "wrongFeedback": "The joke depends on two words that sound the same but mean different things — that makes it a pun."
+    },
+    {
+      "id": "pa-fill-04",
+      "type": "fill_blank",
+      "concept": "alliteration",
+      "question": "“Lucky lions leap loudly” is an example of ____.",
+      "answers": ["alliteration"],
+      "accept": [],
+      "allowTypos": true,
+      "examples": ["lucky lions"],
+      "hint": "Say the first sound of each word: l, l, l, l.",
+      "solution": "Every word starts with the l sound. Repeating a starting sound like this is alliteration.",
+      "wrongFeedback": "All four words start with the l sound. Repeating the starting sound in nearby words is called alliteration."
+    },
+    {
+      "id": "pa-fill-05",
+      "type": "fill_blank",
+      "concept": "pun",
+      "question": "“Never trust an atom — they make up everything.” “Make up” has two meanings here, so the sentence is a ____.",
+      "answers": ["pun"],
+      "accept": ["a pun", "play on words", "a play on words", "wordplay", "word play"],
+      "examples": ["trust an atom", "make up everything"],
+      "hint": "Atoms make up (form) everything. What else can “make up” mean?",
+      "solution": "Atoms make up (form) everything, and to “make up” a story means to invent it. Two meanings: a pun.",
+      "wrongFeedback": "“Make up” means to form something and also to invent a story. A phrase with two meanings creates a pun."
+    }
+  ]
+}

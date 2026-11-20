@@ -76,4 +76,11 @@ async function requireStudentAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireStudentAuth };
+async function requireParentAuth(req, res, next) {
+  const resolved = await resolveVerifiedUser(req, res, 'parent');
+  if (!resolved) return;
+  req.auth = { uid: resolved.uid, email: resolved.email, parentId: resolved.userId };
+  next();
+}
+
+module.exports = { requireAuth, requireStudentAuth, requireParentAuth };

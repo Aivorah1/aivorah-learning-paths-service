@@ -1,0 +1,239 @@
+{
+  "id": "math.fractions.equivalent",
+  "version": 1,
+  "label": "Finding equivalent fractions",
+  "shortName": "Equivalent fractions",
+  "subject": "Mathematics",
+  "subjectPattern": "math",
+  "grades": [3, 4, 5, 6, 7],
+  "curriculumRefs": [
+    { "board": "CBSE", "grade": 6, "subject": "Mathematics", "book": "Ganita Prakash", "bookCode": "fegp1", "chapter": 7, "chapterTitle": "Fractions", "section": "7.6", "title": "Equivalent Fractions", "pdf": "fegp107.pdf" }
+  ],
+  "match": {
+    "patterns": [
+      "equivalent",
+      "simplest form",
+      "lowest terms",
+      "\\b\\d+\\s*/\\s*\\d+\\s*=\\s*(\\?|_+|□|\\(\\s*\\))\\s*/\\s*\\d+",
+      "\\b\\d+\\s*/\\s*\\d+\\s*=\\s*\\d+\\s*/\\s*(\\?|_+|□|\\(\\s*\\))",
+      "same (amount|value) as \\d+\\s*/\\s*\\d+"
+    ]
+  },
+  "concepts": {},
+  "nextPractice": "Make equivalent fractions by multiplying or dividing the numerator and denominator by the same number.",
+  "teaching": {
+    "refresher": {
+      "title": "Quick refresher",
+      "body": "Equivalent fractions show the same amount. To make one, multiply (or divide) the top number and the bottom number by the same number.",
+      "examples": [
+        { "label": "Example", "text": "1/2 = 2/4 = 3/6 (multiply top and bottom by 2, then by 3)" }
+      ]
+    },
+    "methods": [
+      {
+        "id": "definition",
+        "name": "Definition",
+        "title": "What equivalent fractions are",
+        "body": "Equivalent fractions look different but show the same part of a whole. To make one, multiply or divide BOTH the numerator (top) and the denominator (bottom) by the same number. Adding the same number to both does not work.",
+        "examples": [
+          { "label": "Worked example", "text": "2/5: multiply top and bottom by 3 → 6/15. So 2/5 = 6/15." }
+        ]
+      },
+      {
+        "id": "side_by_side",
+        "name": "Side-by-side comparison",
+        "title": "Same amount or not?",
+        "body": "Put two fractions side by side and ask: did the top and the bottom change by the SAME multiplication?",
+        "table": [
+          ["", "Equivalent", "Not equivalent"],
+          ["Pair", "1/3 and 2/6", "1/3 and 2/4"],
+          ["Top", "1 × 2 = 2", "1 + 1 = 2"],
+          ["Bottom", "3 × 2 = 6", "3 + 1 = 4"],
+          ["Same amount?", "Yes — both multiplied by 2", "No — adding changes the amount"]
+        ]
+      },
+      {
+        "id": "visual",
+        "name": "Picture it",
+        "title": "Picture a chocolate bar",
+        "body": "Picture a chocolate bar cut into 4 equal pieces. You eat 2 pieces: that is 2/4 of the bar. Now picture the same bar cut into 8 equal pieces. To eat the same amount you need 4 pieces: 4/8. Same chocolate, smaller pieces, so 2/4 = 4/8.",
+        "examples": [
+          { "label": "Same amount", "text": "2 of 4 big pieces = 4 of 8 small pieces" }
+        ]
+      },
+      {
+        "id": "guided_steps",
+        "name": "Step by step",
+        "title": "Find the missing number step by step",
+        "body": "Example: 3/4 = ?/20",
+        "steps": [
+          "Look at the numbers you know on the same level: 4 on the bottom becomes 20.",
+          "Ask: 4 times what is 20? 4 × 5 = 20.",
+          "Do the same to the top: 3 × 5 = 15.",
+          "So 3/4 = 15/20. Check: both numbers were multiplied by 5."
+        ]
+      }
+    ],
+    "confusions": [
+      {
+        "id": "added_same_number",
+        "whenStudentAnswer": "fraction_added_same",
+        "text": "In your test, it looks like the same number was added to the top and the bottom. Adding changes the amount: 1/3 and 2/4 are not equal. To keep the amount the same, multiply (or divide) the top and the bottom by the same number."
+      }
+    ]
+  },
+  "rubric": {
+    "keyIdeas": [
+      "Multiply or divide the numerator and the denominator by the same (non-zero) number.",
+      "Equivalent fractions represent the same amount or the same part of a whole."
+    ],
+    "acceptableSimpleWording": [
+      "times both by 3",
+      "I did the same to the top and the bottom",
+      "4 goes into 20 five times so 3 times 5",
+      "half of the pieces is the same",
+      "divide both by 4"
+    ],
+    "misconceptionRules": [
+      {
+        "id": "added_instead_of_multiplied",
+        "reasoningMatches": "\\badd(ed|ing)?\\b|\\bplus\\b|\\+",
+        "unlessMatches": "multipl|times|×|\\bx\\s*\\d|\\d\\s*x\\b|divid|÷",
+        "feedback": "Your answer is right, but adding the same number to the top and bottom does not keep a fraction the same — multiplying or dividing both by the same number does."
+      }
+    ],
+    "misconceptionFeedback": "Your answer is right, but the reason isn't quite how equivalent fractions work. Multiply or divide the top and bottom by the same number to keep the amount the same."
+  },
+  "questions": [
+    {
+      "id": "ef-mcq-01",
+      "type": "mcq",
+      "question": "Which fraction is equivalent to 2/3?",
+      "options": ["4/6", "3/4", "2/6", "3/2"],
+      "answer": 0,
+      "examples": ["2/3"],
+      "hint": "Multiply the top AND the bottom of 2/3 by the same number. Try 2.",
+      "solution": "2/3 × 2/2 = 4/6. Both the top and the bottom were multiplied by 2, so 4/6 shows the same amount.",
+      "whyWrong": {
+        "1": "3/4 adds 1 to the top and the bottom of 2/3. Adding changes the amount — multiply both by the same number instead.",
+        "2": "2/6 only changes the bottom number, so each piece gets smaller and the amount changes.",
+        "3": "3/2 flips the fraction, which makes it more than a whole. Keep the top on top and multiply both numbers by the same number."
+      }
+    },
+    {
+      "id": "ef-mcq-02",
+      "type": "mcq",
+      "question": "Which fraction is NOT equivalent to 1/4?",
+      "options": ["2/8", "3/12", "4/12", "5/20"],
+      "answer": 2,
+      "examples": ["1/4"],
+      "hint": "For each fraction, check: is the bottom number exactly 4 times the top number?",
+      "solution": "In 2/8, 3/12 and 5/20 the bottom is 4 times the top, so they equal 1/4. In 4/12 the bottom is only 3 times the top, so 4/12 = 1/3, not 1/4.",
+      "whyWrong": {
+        "0": "2/8 is 1/4 with the top and bottom both multiplied by 2, so it IS equivalent. Look for the one where that doesn't work.",
+        "1": "3/12 is 1/4 with the top and bottom both multiplied by 3, so it IS equivalent.",
+        "3": "5/20 is 1/4 with the top and bottom both multiplied by 5, so it IS equivalent."
+      }
+    },
+    {
+      "id": "ef-mcq-03",
+      "type": "mcq",
+      "question": "Which number makes 3/5 = □/10 true?",
+      "options": ["8", "6", "5", "13"],
+      "answer": 1,
+      "examples": ["3/5"],
+      "hint": "5 times what gives 10? Do the same to the 3.",
+      "solution": "5 × 2 = 10, so multiply the top by 2 as well: 3 × 2 = 6. 3/5 = 6/10.",
+      "whyWrong": {
+        "0": "8 comes from adding 5 to the top (because 5 + 5 = 10). Fractions stay equal when you multiply, not add: 5 × 2 = 10, so 3 × 2 = 6.",
+        "2": "5 doesn't follow a rule here. The bottom was multiplied by 2, so the top must be too: 3 × 2 = 6.",
+        "3": "13 is 3 + 10. Multiply instead: 5 × 2 = 10, so 3 × 2 = 6."
+      }
+    },
+    {
+      "id": "ef-mcq-04",
+      "type": "mcq",
+      "question": "Riya ate 4/8 of a pizza. Which fraction shows the same amount?",
+      "options": ["4/4", "1/2", "2/8", "8/4"],
+      "answer": 1,
+      "examples": ["4/8"],
+      "hint": "Divide the top and the bottom of 4/8 by the same number. Try 4.",
+      "solution": "4 ÷ 4 = 1 and 8 ÷ 4 = 2, so 4/8 = 1/2. Half the pizza.",
+      "whyWrong": {
+        "0": "4/4 is the whole pizza. Only the bottom changed, so the amount changed.",
+        "2": "2/8 is only part of what Riya ate: the top changed but the bottom didn't.",
+        "3": "8/4 flips the fraction and means two whole pizzas."
+      }
+    },
+    {
+      "id": "ef-mcq-05",
+      "type": "mcq",
+      "question": "Which pair of fractions are equivalent?",
+      "options": ["5/6 and 6/7", "2/7 and 4/7", "5/6 and 10/12", "3/9 and 9/3"],
+      "answer": 2,
+      "examples": ["5/6", "10/12"],
+      "hint": "Look for a pair where the top and the bottom were both multiplied by the same number.",
+      "solution": "5 × 2 = 10 and 6 × 2 = 12, so 5/6 = 10/12.",
+      "whyWrong": {
+        "0": "6/7 adds 1 to the top and bottom of 5/6. Adding changes the amount.",
+        "1": "2/7 and 4/7 have the same bottom, but 4 sevenths is twice as much as 2 sevenths.",
+        "3": "9/3 is 3/9 turned upside down: 9/3 is 3 wholes, but 3/9 is less than one."
+      }
+    },
+    {
+      "id": "ef-fill-01",
+      "type": "fill_blank",
+      "question": "Fill in the blank: 2/7 = ____/21",
+      "answers": ["6"],
+      "accept": ["six"],
+      "examples": ["2/7"],
+      "hint": "7 times what is 21? Do the same to the 2.",
+      "solution": "7 × 3 = 21, so 2 × 3 = 6. 2/7 = 6/21.",
+      "wrongFeedback": "The bottom went from 7 to 21, which is × 3. Multiply the top by 3 too: 2 × 3 = 6."
+    },
+    {
+      "id": "ef-fill-02",
+      "type": "fill_blank",
+      "question": "Fill in the blank: 5/8 = 15/____",
+      "answers": ["24"],
+      "accept": ["twenty four", "twenty-four"],
+      "examples": ["5/8"],
+      "hint": "5 times what is 15? Do the same to the 8.",
+      "solution": "5 × 3 = 15, so 8 × 3 = 24. 5/8 = 15/24.",
+      "wrongFeedback": "The top went from 5 to 15, which is × 3. Multiply the bottom by 3 too: 8 × 3 = 24."
+    },
+    {
+      "id": "ef-fill-03",
+      "type": "fill_blank",
+      "question": "Fill in the blank: 12/16 in simplest form is 3/____",
+      "answers": ["4"],
+      "accept": ["four"],
+      "examples": ["12/16"],
+      "hint": "12 divided by what is 3? Divide the 16 by the same number.",
+      "solution": "12 ÷ 4 = 3, so 16 ÷ 4 = 4. 12/16 = 3/4.",
+      "wrongFeedback": "The top went from 12 to 3, which is ÷ 4. Divide the bottom by 4 too: 16 ÷ 4 = 4."
+    },
+    {
+      "id": "ef-fill-04",
+      "type": "fill_blank",
+      "question": "Fill in the blank: 4/9 = ____/36",
+      "answers": ["16"],
+      "accept": ["sixteen"],
+      "examples": ["4/9"],
+      "hint": "9 times what is 36? Do the same to the 4.",
+      "solution": "9 × 4 = 36, so 4 × 4 = 16. 4/9 = 16/36.",
+      "wrongFeedback": "The bottom went from 9 to 36, which is × 4. Multiply the top by 4 too: 4 × 4 = 16."
+    },
+    {
+      "id": "ef-fill-05",
+      "type": "fill_blank",
+      "question": "Fill in the blank: 7/10 = 21/____",
+      "answers": ["30"],
+      "accept": ["thirty"],
+      "examples": ["7/10"],
+      "hint": "7 times what is 21? Do the same to the 10.",
+      "solution": "7 × 3 = 21, so 10 × 3 = 30. 7/10 = 21/30.",
+      "wrongFeedback": "The top went from 7 to 21, which is × 3. Multiply the bottom by 3 too: 10 × 3 = 30."
+    }
+  ]
+}
