@@ -72,6 +72,35 @@ function cleanMethod(m, id, name) {
   return out;
 }
 
+// One generated question -> a safe, gradable question, or null when any
+// part is missing or inconsistent (bad answer index, duplicate options, no
+// blank, an over-long typed answer). Shared by topic packs and the
+// one-at-a-time practice questions.
+function cleanQuestion(q) {
+  if (!q || typeof q !== 'object') return null;
+  const question = clip(q.question, 400);
+  const hint = clip(q.hint, 300);
+  const solution = clip(q.solution, 500);
+  if (!question || !hint || !solution) return null;
+  const keyIdea = clip(q.keyIdea, 240) || null;
+  if (q.type === 'mcq') {
+    const options = Array.isArray(q.options) ? q.options.map((o) => clip(o, 200)).filter(Boolean) : [];
+    const distinct = new Set(options.map((o) => o.toLowerCase()));
+    const answer = Number(q.answer);
+    if (options.length < 3 || options.length > 4 || distinct.size !== options.length || !Number.isInteger(answer) || answer < 0 || answer >= options.length) return null;
+    const whyWrong = {};
+    for (const [k, v] of Object.entries(q.whyWrong || {})) if (Number(k) !== answer && options[Number(k)] && clip(v, 300)) whyWrong[String(Number(k))] = clip(v, 300);
+    return { type: 'mcq', question, options, answer, hint, solution, whyWrong, ...(keyIdea ? { keyIdea } : {}) };
+  }
+  if (q.type === 'fill_blank') {
+    if (!/_{2,}/.test(question)) return null;
+    const answers = (Array.isArray(q.answers) ? q.answers : [q.answers]).map((a) => clip(a, 60)).filter((a) => a && a.split(' ').length <= 4).slice(0, 3);
+    if (!answers.length) return null;
+    return { type: 'fill_blank', question, answers, accept: [], hint, solution, wrongFeedback: clip(q.wrongFeedback, 300) || solution, ...(keyIdea ? { keyIdea } : {}) };
+  }
+  return null;
+}
+
 // Turns the model's reply into a safe pack, or throws. Drops any question
 // that isn't fully valid; needs at least MIN_QUESTIONS good ones.
 function validatePack(parsed, { topic }) {
@@ -83,28 +112,7 @@ function validatePack(parsed, { topic }) {
   if (methods.length < 2) throw new GenerationError('not enough teaching methods');
   const refresher = cleanMethod(t.refresher, 'refresher', 'Quick refresher') || { ...methods[0], id: 'refresher', name: 'Quick refresher' };
 
-  const questions = [];
-  for (const q of Array.isArray(parsed.questions) ? parsed.questions : []) {
-    if (!q || typeof q !== 'object') continue;
-    const question = clip(q.question, 400);
-    const hint = clip(q.hint, 300);
-    const solution = clip(q.solution, 500);
-    if (!question || !hint || !solution) continue;
-    if (q.type === 'mcq') {
-      const options = Array.isArray(q.options) ? q.options.map((o) => clip(o, 200)).filter(Boolean) : [];
-      const distinct = new Set(options.map((o) => o.toLowerCase()));
-      const answer = Number(q.answer);
-      if (options.length < 3 || options.length > 4 || distinct.size !== options.length || !Number.isInteger(answer) || answer < 0 || answer >= options.length) continue;
-      const whyWrong = {};
-      for (const [k, v] of Object.entries(q.whyWrong || {})) if (Number(k) !== answer && options[Number(k)] && clip(v, 300)) whyWrong[String(Number(k))] = clip(v, 300);
-      questions.push({ type: 'mcq', question, options, answer, hint, solution, whyWrong });
-    } else if (q.type === 'fill_blank') {
-      if (!/_{2,}/.test(question)) continue;
-      const answers = (Array.isArray(q.answers) ? q.answers : [q.answers]).map((a) => clip(a, 60)).filter((a) => a && a.split(' ').length <= 4).slice(0, 3);
-      if (!answers.length) continue;
-      questions.push({ type: 'fill_blank', question, answers, accept: [], hint, solution, wrongFeedback: clip(q.wrongFeedback, 300) || solution });
-    }
-  }
+  const questions = (Array.isArray(parsed.questions) ? parsed.questions : []).map(cleanQuestion).filter(Boolean);
   if (questions.length < MIN_QUESTIONS) throw new GenerationError(`only ${questions.length} valid questions`);
   questions.forEach((q, i) => { q.id = `tq-${i + 1}`; q.examples = []; });
 
@@ -170,4 +178,4 @@ function displayNames(f) {
   };
 }
 
-module.exports = { PREFIX, GenerationError, isTopicSkillId, topicSkillId, defaultLabel, buildPrompt, validatePack, generatePack, skillForFollowup, displayNames, MAX_LESSON_CHARS };
+module.exports = { cleanQuestion, parseJSON, withTimeout, clip, PREFIX, GenerationError, isTopicSkillId, topicSkillId, defaultLabel, buildPrompt, validatePack, generatePack, skillForFollowup, displayNames, MAX_LESSON_CHARS };

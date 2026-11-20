@@ -34,6 +34,8 @@ const { parseAnswer, gradeAnswer, correctAnswerText, wrongFeedback } = require('
 const reasoningCheck = require('../services/practiceFollowup/reasoning');
 const { computeTopicHelp } = require('../services/practiceFollowup/topicHelp');
 const topicSkill = require('../services/practiceFollowup/topicSkill');
+const ctxLoad = require('../services/practiceFollowup/context');
+const questionAi = require('../services/practiceFollowup/questionAi');
 
 const router = express.Router();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -53,8 +55,9 @@ async function loadOwnFollowup(req, res) {
   const f = await store.getFollowup(req.params.id);
   // Same answer for "missing" and "someone else's": never reveals another learner's data.
   if (!f || f.student_id !== req.auth.studentId) { res.status(404).json({ error: 'Not found' }); return null; }
-  // A topic skill has no skill object until its pack is built (on open).
-  const skill = topicSkill.skillForFollowup(f);
+  // The skill with its bank / topic pack and generated practice questions.
+  // A topic skill opened the first way has no skill until its pack is built.
+  const skill = (f.current_focus_index != null || topicSkill.skillForFollowup(f)) ? await ctxLoad.loadSkill(f) : null;
   if (!skill && !topicSkill.isTopicSkillId(f.skill_id)) { res.status(410).json({ code: 'skill_unavailable', error: 'This practice is no longer available.' }); return null; }
   return { f, skill };
 }
@@ -174,7 +177,12 @@ async function advanceAfter(f, skill, responses, answeredQuestionId) {
   const attempt = await store.getAttempt(f.attempt_id);
   const p = session.deriveProgress(responses);
   const patch = { independent_streak: p.streak, current_help: 'none', status: p.completed ? 'completed' : 'in_progress' };
-  if (p.completed) {
+  if (f.current_focus_index != null) {
+    // Practise This Skill (per wrong question): no automatic next question,
+    // the student asks for another; the 2-in-a-row rule never ends practice.
+    if (p.completed && f.status !== 'completed') patch.completed_at = p.completedAt;
+    if (!p.pending) Object.assign(patch, { current_question_id: null, current_is_memory_check: false });
+  } else if (p.completed) {
     Object.assign(patch, { completed_at: p.completedAt, current_question_id: null });
   } else if (!p.pending) {
     const next = session.pickNextQuestion(skill, session.exclusionContext(skill, attempt), { usedIds: p.answeredIds, lastType: p.last?.question_type });
@@ -225,30 +233,7 @@ router.get('/attempts/:attemptId', requireStudentAuth, async (req, res) => {
   }
 });
 
-// Creates (once) and returns the follow-ups one test attempt recommends.
-async function syncFollowups(attempt, topicIdParam) {
-    const { recommendations, unmapped } = recommendForAttempt(attempt);
-    const existing = await store.listFollowupsForAttempt(attempt.id);
-    const have = new Set(existing.map((f) => f.skill_id));
-    const topicId = UUID.test(String(topicIdParam || '')) ? topicIdParam : null;
-    const missing = recommendations.filter((r) => !have.has(r.skillId)).map((r) => ({
-      student_id: attempt.student_id,
-      attempt_id: attempt.id,
-      skill_id: r.skillId,
-      topic: attempt.topic,
-      topic_id: topicId,
-      subject: attempt.subject,
-      grade: attempt.grade,
-      curriculum: attempt.curriculum || '',
-      original_score: attempt.score,
-      evidence: r.evidence,
-      evidence_question_count: r.evidence.length,
-      status: 'available',
-    }));
-    await store.createFollowups(missing);
-    const followups = missing.length ? await store.listFollowupsForAttempt(attempt.id) : existing;
-    return { followups, unmapped };
-}
+const { syncFollowups } = ctxLoad;
 
 // ── Ask Aivorah on a topic: the follow-up to open there ─────────────────
 // The newest test on this topic that recommends practice, and its first
@@ -265,7 +250,9 @@ router.get('/for-topic', requireStudentAuth, async (req, res) => {
       const responses = await store.listResponses(followups.map((f) => f.id));
       const open = followups.find((f) => f.status !== 'completed' && !session.deriveProgress(responses.filter((r) => r.followup_id === f.id)).completed);
       const pick = open || followups[0];
-      return res.json({ followupId: pick.id, attemptId: attempt.id, completed: !open });
+      // The first question that was wrong in that test (for Ask Aivorah to open).
+      const wrongIdx = (attempt.per_question_results || []).findIndex((q, i) => q && q.type !== 'spoken' && !q.isCorrect && (pick.evidence || []).some((e) => e.index === i));
+      return res.json({ followupId: pick.id, attemptId: attempt.id, completed: !open, questionIndex: wrongIdx >= 0 ? wrongIdx : null });
     }
     res.json({ followupId: null, attemptId: attempts[0]?.id || null, hasTest: attempts.length > 0 });
   } catch (err) {
@@ -431,7 +418,7 @@ router.post('/:id/hint', requireStudentAuth, async (req, res) => {
     const questionId = requireQuestionId(req, res);
     if (!questionId) return;
     const { f } = own;
-    if (f.current_question_id !== questionId || f.status === 'completed') return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
+    if (f.current_question_id !== questionId || (f.status === 'completed' && f.current_focus_index == null)) return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
     const q = own.skill._byId.get(questionId);
     if (f.current_help === 'none') {
       // Save that help was shown BEFORE showing it: this question can no
@@ -457,19 +444,70 @@ router.post('/:id/solution', requireStudentAuth, async (req, res) => {
     const responses = await store.listResponses(f.id);
     const existing = responses.find((r) => r.question_id === questionId);
     if (existing) return res.json({ duplicate: true, solution: q?.solution, correctAnswer: q ? correctAnswerText(q) : null, session: sessionView(f, skill, responses) });
-    if (f.current_question_id !== questionId || f.status === 'completed') return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
+    if (f.current_question_id !== questionId || (f.status === 'completed' && f.current_focus_index == null)) return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
     const inserted = await store.insertResponse({
       followup_id: f.id, student_id: f.student_id, skill_id: f.skill_id,
       question_id: q.id, question_type: q.type, question_text: q.question,
       seq: responses.length + 1,
       answer: null, reasoning: null,
       help_shown: 'solution', grading_outcome: 'not_answered', reasoning_outcome: 'not_evaluated', credit: 'none',
-      feedback: q.solution, finalized_at: new Date().toISOString(),
+      feedback: q.solution, finalized_at: new Date(ctxLoad.clock.now()).toISOString(),
+      ...focusFields(f),
     });
     if (inserted.duplicate) return res.status(409).json({ code: 'reload', error: 'Please reload.' });
     const all = [...responses, inserted.row];
     const saved = await advanceAfter(f, skill, all, questionId);
     res.json({ solution: q.solution, correctAnswer: correctAnswerText(q), message: MESSAGES.solution, session: sessionView(saved, skill, all) });
+  } catch (err) {
+    saveFailed(res, err);
+  }
+});
+
+// Which wrong question / level / memory check an answer belongs to.
+function focusFields(f) {
+  if (f.current_focus_index == null) return {};
+  return { origin_question_index: f.current_focus_index, question_level: f.current_question_level || null, is_memory_check: !!f.current_is_memory_check };
+}
+
+const ASK_FOR_WORKING = ' Tell me one step of how you worked it out, and I’ll find exactly where it went wrong.';
+
+// A wrong answer's feedback: the exact step when the working shows it,
+// otherwise the general correction plus a request for one working step.
+async function diagnosisFor(f, q, parsed, working) {
+  const d = await questionAi.diagnoseMistake(
+    { grade: f.grade, subject: f.subject, topic: f.topic, lessonText: await ctxLoad.lessonTextFor(f) },
+    { question: q, answerText: parsed.text, working },
+  );
+  if (d.status === 'identified') return { mistake_tag: d.step, reasoning_outcome: 'misconception', feedback: `${MESSAGES.incorrectLead}${d.feedback}` };
+  return { feedback: `${MESSAGES.incorrectLead}${wrongFeedback(q, parsed)}${ASK_FOR_WORKING}` };
+}
+
+// The student explains how they worked out a wrong answer: Aivorah names the
+// step only when the working supports it. The answer itself stays wrong.
+router.post('/:id/working', requireStudentAuth, async (req, res) => {
+  try {
+    const own = await loadOwnFollowup(req, res);
+    if (!own) return;
+    if (!requireBuilt(own, res)) return;
+    const questionId = requireQuestionId(req, res);
+    if (!questionId) return;
+    const working = reasoningCheck.cleanReasoning(req.body?.working);
+    if (!working) return res.status(400).json({ error: 'Tell me one step of how you worked it out.' });
+    const responses = await store.listResponses(own.f.id);
+    const r = responses.find((x) => x.question_id === questionId);
+    const q = own.skill._byId.get(questionId);
+    if (!r || !q || r.grading_outcome !== 'incorrect') return res.status(409).json({ code: 'stale', error: 'Please reload.' });
+    if (r.mistake_tag) return res.json({ duplicate: true, identified: true, step: r.mistake_tag, feedback: r.feedback });
+    const d = await questionAi.diagnoseMistake(
+      { grade: own.f.grade, subject: own.f.subject, topic: own.f.topic, lessonText: await ctxLoad.lessonTextFor(own.f) },
+      { question: q, answerText: r.answer, working },
+    );
+    if (d.status !== 'identified') {
+      await store.updateResponseWhere(r.id, { clarification: working });
+      return res.json({ identified: false, feedback: 'Thanks! I still can’t tell exactly which step went wrong, so I won’t guess. Try a fresh question and show each step.' });
+    }
+    const updated = await store.updateResponseWhere(r.id, { clarification: working, mistake_tag: d.step, reasoning_outcome: 'misconception', feedback: `${MESSAGES.incorrectLead}${d.feedback}` }, { mistakeTagIsNull: true });
+    res.json({ identified: true, step: d.step, feedback: (updated || r).feedback });
   } catch (err) {
     saveFailed(res, err);
   }
@@ -490,7 +528,7 @@ router.post('/:id/answer', requireStudentAuth, async (req, res) => {
     // result and adds no new evidence.
     const existing = responses.find((r) => r.question_id === questionId);
     if (existing) return res.json({ duplicate: true, result: resultView(skill, existing), session: sessionView(f, skill, responses) });
-    if (!q || f.current_question_id !== questionId || f.status === 'completed') {
+    if (!q || f.current_question_id !== questionId || (f.status === 'completed' && f.current_focus_index == null)) {
       return res.status(409).json({ code: 'stale', error: 'This question has changed. Please reload.' });
     }
     if (responses.some((r) => r.credit === 'pending_clarification')) return res.status(409).json({ code: 'clarification_pending', error: 'Finish your explanation first.' });
@@ -504,6 +542,7 @@ router.post('/:id/answer', requireStudentAuth, async (req, res) => {
     let row;
     if (!correct) {
       row = { grading_outcome: 'incorrect', reasoning_outcome: 'not_evaluated', credit: 'none', feedback: `${MESSAGES.incorrectLead}${wrongFeedback(q, parsed)}${MESSAGES.incorrectNext}` };
+      if (f.current_focus_index != null) Object.assign(row, await diagnosisFor(f, q, parsed, reasoning));
     } else if (helped) {
       row = { grading_outcome: 'correct', reasoning_outcome: 'not_evaluated', credit: 'assisted', feedback: MESSAGES.assisted };
     } else {
@@ -524,7 +563,8 @@ router.post('/:id/answer', requireStudentAuth, async (req, res) => {
       answer: parsed.text, reasoning: reasoning || null,
       help_shown: helped ? 'hint' : 'none',
       ...row,
-      finalized_at: row.credit === 'pending_clarification' ? null : new Date().toISOString(),
+      finalized_at: row.credit === 'pending_clarification' ? null : new Date(ctxLoad.clock.now()).toISOString(),
+      ...focusFields(f),
     });
     if (inserted.duplicate) {
       const now = await store.listResponses(f.id);
@@ -565,7 +605,7 @@ router.post('/:id/clarify', requireStudentAuth, async (req, res) => {
       : ev.outcome === 'misconception'
         ? { reasoning_outcome: 'misconception', credit: 'none', feedback: `${ev.feedback || skill.rubric.misconceptionFeedback} Let's try another new question.` }
         : { reasoning_outcome: 'unclear', credit: 'none', feedback: MESSAGES.clarifyUnclear };
-    const updated = await store.resolvePendingResponse(r.id, { ...patch, clarification, finalized_at: new Date().toISOString() });
+    const updated = await store.resolvePendingResponse(r.id, { ...patch, clarification, finalized_at: new Date(ctxLoad.clock.now()).toISOString() });
     if (!updated) {
       const now = await store.listResponses(f.id);
       const saved = now.find((x) => x.id === r.id);

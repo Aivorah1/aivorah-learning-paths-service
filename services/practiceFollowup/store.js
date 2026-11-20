@@ -3,8 +3,8 @@
 // the route can show a retry instead of a result that was never saved.
 const supabase = require('../supabase');
 
-const FOLLOWUP_COLS = 'id, student_id, attempt_id, skill_id, topic, topic_id, subject, grade, curriculum, original_score, evidence, evidence_question_count, status, teaching_methods_used, current_method, current_question_id, current_help, independent_streak, completed_at, created_at, updated_at, skill_pack';
-const RESPONSE_COLS = 'id, followup_id, student_id, skill_id, question_id, question_type, question_text, seq, answer, reasoning, clarification, help_shown, grading_outcome, reasoning_outcome, credit, feedback, created_at, finalized_at';
+const FOLLOWUP_COLS = 'id, student_id, attempt_id, skill_id, topic, topic_id, subject, grade, curriculum, original_score, evidence, evidence_question_count, status, teaching_methods_used, current_method, current_question_id, current_help, independent_streak, completed_at, created_at, updated_at, skill_pack, current_focus_index, current_question_level, current_is_memory_check';
+const RESPONSE_COLS = 'id, followup_id, student_id, skill_id, question_id, question_type, question_text, seq, answer, reasoning, clarification, help_shown, grading_outcome, reasoning_outcome, credit, feedback, created_at, finalized_at, origin_question_index, question_level, is_memory_check, skipped, mistake_tag';
 
 class StoreError extends Error {
   constructor(message, code) { super(message); this.code = code; }
@@ -89,6 +89,66 @@ async function listStudentTopicAttempts(studentId, topic, subject) {
   return data || [];
 }
 
+// ── Explain This Question / Practise This Skill ─────────────────────────
+const EXPLANATION_COLS = 'id, followup_id, student_id, attempt_id, question_index, method, variant, skill_label, payload, created_at';
+const GENERATED_COLS = 'id, followup_id, question_id, origin_question_index, level, payload, fingerprint, created_at';
+
+async function insertExplanation(row) {
+  const { data, error } = await supabase.from('practice_explanations').insert(row).select(EXPLANATION_COLS).single();
+  if (error) fail(error);
+  return data;
+}
+
+async function listExplanations({ attemptId, studentId, followupIds } = {}) {
+  let q = supabase.from('practice_explanations').select(EXPLANATION_COLS);
+  if (attemptId) q = q.eq('attempt_id', attemptId);
+  if (studentId) q = q.eq('student_id', studentId);
+  if (followupIds) { if (!followupIds.length) return []; q = q.in('followup_id', followupIds); }
+  const { data, error } = await q.order('created_at', { ascending: true });
+  if (error) fail(error);
+  return data || [];
+}
+
+async function listGeneratedQuestions(followupId) {
+  const { data, error } = await supabase.from('practice_generated_questions').select(GENERATED_COLS).eq('followup_id', followupId).order('created_at', { ascending: true });
+  if (error) fail(error);
+  return data || [];
+}
+
+// Saves fresh questions; a repeat (same id or same text) is skipped, not an error.
+async function insertGeneratedQuestions(rows) {
+  const saved = [];
+  for (const row of rows) {
+    const { data, error } = await supabase.from('practice_generated_questions').insert(row).select(GENERATED_COLS).single();
+    if (error) { if (isUniqueViolation(error)) continue; fail(error); }
+    saved.push(data);
+  }
+  return saved;
+}
+
+// Updates one saved answer once (e.g. adds the diagnosed mistake step).
+async function updateResponseWhere(id, patch, { mistakeTagIsNull = false } = {}) {
+  let q = supabase.from('practice_followup_responses').update(patch).eq('id', id);
+  if (mistakeTagIsNull) q = q.is('mistake_tag', null);
+  const { data, error } = await q.select(RESPONSE_COLS);
+  if (error) fail(error);
+  return (data && data[0]) || null;
+}
+
+async function getStudentBasic(id) {
+  const { data, error } = await supabase.from('users').select('id, name, grade, curriculum').eq('id', id).maybeSingle();
+  if (error) fail(error);
+  return data;
+}
+
+async function listStudentAttempts(studentId, limit = 30) {
+  const { data, error } = await supabase.from('topic_attempts')
+    .select('id, topic, subject, grade, curriculum, score, total_questions, correct_answers, per_question_results, created_at')
+    .eq('student_id', studentId).order('created_at', { ascending: false }).limit(limit);
+  if (error) fail(error);
+  return data || [];
+}
+
 async function listResponses(followupIds) {
   const ids = Array.isArray(followupIds) ? followupIds : [followupIds];
   if (!ids.length) return [];
@@ -163,6 +223,7 @@ async function listAttempts(ids) {
 module.exports = {
   StoreError, getAttempt, listFollowupsForAttempt, createFollowups, getFollowup, updateFollowup,
   saveSkillPack, getTopicLessonText, listStudentTopicAttempts,
+  insertExplanation, listExplanations, listGeneratedQuestions, insertGeneratedQuestions, updateResponseWhere, getStudentBasic, listStudentAttempts,
   listResponses, insertResponse, resolvePendingResponse, listFollowupsForStudents, listResponsesForStudents,
   isParentOf, teacherStudentIds, countAssessments, listAttempts,
 };

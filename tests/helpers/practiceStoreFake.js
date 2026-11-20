@@ -4,10 +4,12 @@
 const crypto = require('crypto');
 
 function createFakeStore() {
-  const db = { attempts: [], followups: [], responses: [], parentLinks: [], teacherLinks: [] };
+  const db = { attempts: [], followups: [], responses: [], parentLinks: [], teacherLinks: [], explanations: [], generated: [], users: [] };
   const failNext = { update: 0, insert: 0 };
   const clone = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)));
-  const now = () => new Date(Date.now() + db.responses.length).toISOString();
+  let tick = 0;
+  // Server time for rows; tests can set db.clock to simulate days passing.
+  const now = () => new Date((db.clock ? db.clock() : Date.now()) + (tick += 1)).toISOString();
 
   const api = {
     db, failNext,
@@ -43,6 +45,33 @@ function createFakeStore() {
       return clone(db.attempts.filter((a) => a.student_id === studentId && a.topic === topic && (!subject || a.subject === subject))
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
     },
+    async insertExplanation(row) {
+      if (failNext.insert > 0) { failNext.insert -= 1; throw new Error('connection reset'); }
+      const saved = { id: crypto.randomUUID(), variant: 'first', skill_label: null, created_at: now(), ...clone(row) };
+      db.explanations.push(saved);
+      return clone(saved);
+    },
+    async listExplanations({ attemptId, studentId, followupIds } = {}) {
+      return clone(db.explanations.filter((e) => (!attemptId || e.attempt_id === attemptId) && (!studentId || e.student_id === studentId) && (!followupIds || followupIds.includes(e.followup_id))));
+    },
+    async listGeneratedQuestions(followupId) { return clone(db.generated.filter((g) => g.followup_id === followupId)); },
+    async insertGeneratedQuestions(rows) {
+      const out = [];
+      for (const r of rows) {
+        if (db.generated.some((g) => g.followup_id === r.followup_id && (g.question_id === r.question_id || g.fingerprint === r.fingerprint))) continue;
+        const saved = { id: crypto.randomUUID(), created_at: now(), ...clone(r) };
+        db.generated.push(saved); out.push(clone(saved));
+      }
+      return out;
+    },
+    async updateResponseWhere(id, patch, { mistakeTagIsNull = false } = {}) {
+      const r = db.responses.find((x) => x.id === id && (!mistakeTagIsNull || !x.mistake_tag));
+      if (!r) return null;
+      Object.assign(r, clone(patch));
+      return clone(r);
+    },
+    async getStudentBasic(id) { return clone(db.users.find((u) => u.id === id) || null); },
+    async listStudentAttempts(studentId) { return clone(db.attempts.filter((a) => a.student_id === studentId)); },
     async listResponses(ids) {
       const set = new Set(Array.isArray(ids) ? ids : [ids]);
       return clone(db.responses.filter((r) => set.has(r.followup_id)).sort((a, b) => a.seq - b.seq));

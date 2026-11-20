@@ -88,6 +88,23 @@ Runs on `PORT` (default `3014`).
   `practice_followups.skill_pack` (aivorah-db `0031`). Optional env:
   `PRACTICE_REASONING_TIMEOUT_MS` (default 20000),
   `PRACTICE_GENERATION_TIMEOUT_MS` (default 60000).
+- `/practice-followup/attempts/:attemptId/...` — **Explain This Question** /
+  **Practise This Skill** under each wrong question of a report
+  (`routes/practiceQuestion.js`; aivorah-db `0032`). Student only, own attempt,
+  and the question must have been wrong in it:
+  `POST questions/:index/explain {action: first|again|another_way}` (methods
+  rule → steps → visual, each saved in `practice_explanations`);
+  `POST questions/:index/practice {action: start|next}` (one fresh question at a
+  time, as many as asked; generated questions are kept only when the model
+  answers them the same way WITHOUT the key, stored with server-only keys in
+  `practice_generated_questions`; a new question before answering records the
+  shown one as skipped; 7+ days after the last activity on the skill the first
+  question is a memory check at the level shown before); `GET worked-on`
+  ("What you worked on" per wrong question, from saved rows only).
+  `POST /practice-followup/:id/working {questionId, working}` names the exact
+  mistake step only when the working shows it. Parent (linked) / teacher
+  (linked): `GET /practice-followup/report/students/:studentId` (download data;
+  no chat or reasoning text).
 - `GET /health`
 
 ## Branching

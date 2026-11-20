@@ -43,7 +43,7 @@ function buildPrompt(skill, question, answerText, reasoning) {
 
 Skill: ${skill.label}
 Key ideas a sound explanation connects to:
-${(skill.rubric?.keyIdeas || []).map((k) => `- ${k}`).join('\n')}
+${[question.keyIdea, ...(skill.rubric?.keyIdeas || [])].filter(Boolean).map((k) => `- ${k}`).join('\n')}
 Simple wording that is fine (examples): ${(skill.rubric?.acceptableSimpleWording || []).join('; ')}
 
 Question: ${question.question}${options}
